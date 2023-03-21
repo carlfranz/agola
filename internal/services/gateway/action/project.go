@@ -104,28 +104,7 @@ func (h *ActionHandler) CreateProject(ctx context.Context, req *CreateProjectReq
 		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("project %q already exists", projectPath))
 	}
 
-	rs, _, err := h.configstoreClient.GetRemoteSource(ctx, req.RemoteSourceName)
-	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get remote source %q", req.RemoteSourceName))
-	}
-
-	linkedAccounts, _, err := h.configstoreClient.GetUserLinkedAccounts(ctx, user.ID)
-	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get user %q linked accounts", user.ID))
-	}
-
-	var la *cstypes.LinkedAccount
-	for _, v := range linkedAccounts {
-		if v.RemoteSourceID == rs.ID {
-			la = v
-			break
-		}
-	}
-	if la == nil {
-		return nil, errors.Errorf("user doesn't have a linked account for remote source %q", rs.Name)
-	}
-
-	gitSource, err := h.GetGitSource(ctx, rs, user.Name, la)
+	gitSource, rs, la, err := h.GetUserGitSource(ctx, req.RemoteSourceName, curUserID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create gitsource client")
 	}
@@ -156,6 +135,7 @@ func (h *ActionHandler) CreateProject(ctx context.Context, req *CreateProjectReq
 		SSHPrivateKey:              string(privateKey),
 		SkipSSHHostKeyCheck:        req.SkipSSHHostKeyCheck,
 		PassVarsToForkedPR:         req.PassVarsToForkedPR,
+		DefaultBranch:              repo.DefaultBranch,
 	}
 
 	h.log.Info().Msgf("creating project")
@@ -231,6 +211,7 @@ func (h *ActionHandler) UpdateProject(ctx context.Context, projectRef string, re
 		SSHPrivateKey:              p.SSHPrivateKey,
 		SkipSSHHostKeyCheck:        p.SkipSSHHostKeyCheck,
 		PassVarsToForkedPR:         p.PassVarsToForkedPR,
+		DefaultBranch:              p.DefaultBranch,
 	}
 
 	h.log.Info().Msgf("updating project")
@@ -246,11 +227,6 @@ func (h *ActionHandler) UpdateProject(ctx context.Context, projectRef string, re
 func (h *ActionHandler) ProjectUpdateRepoLinkedAccount(ctx context.Context, projectRef string) (*csapitypes.Project, error) {
 	curUserID := common.CurrentUserID(ctx)
 
-	user, _, err := h.configstoreClient.GetUser(ctx, curUserID)
-	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get user %q", curUserID))
-	}
-
 	p, _, err := h.configstoreClient.GetProject(ctx, projectRef)
 	if err != nil {
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
@@ -264,28 +240,7 @@ func (h *ActionHandler) ProjectUpdateRepoLinkedAccount(ctx context.Context, proj
 		return nil, util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
 	}
 
-	rs, _, err := h.configstoreClient.GetRemoteSource(ctx, p.RemoteSourceID)
-	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get remote source %q", p.RemoteSourceID))
-	}
-
-	linkedAccounts, _, err := h.configstoreClient.GetUserLinkedAccounts(ctx, user.ID)
-	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get user %q linked accounts", user.ID))
-	}
-
-	var la *cstypes.LinkedAccount
-	for _, v := range linkedAccounts {
-		if v.RemoteSourceID == rs.ID {
-			la = v
-			break
-		}
-	}
-	if la == nil {
-		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("user doesn't have a linked account for remote source %q", rs.Name))
-	}
-
-	gitsource, err := h.GetGitSource(ctx, rs, user.Name, la)
+	gitsource, _, la, err := h.GetUserGitSource(ctx, p.RemoteSourceID, curUserID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create gitsource client")
 	}
@@ -310,6 +265,7 @@ func (h *ActionHandler) ProjectUpdateRepoLinkedAccount(ctx context.Context, proj
 		SSHPrivateKey:              p.SSHPrivateKey,
 		SkipSSHHostKeyCheck:        p.SkipSSHHostKeyCheck,
 		PassVarsToForkedPR:         p.PassVarsToForkedPR,
+		DefaultBranch:              p.DefaultBranch,
 	}
 
 	h.log.Info().Msgf("updating project")
@@ -466,11 +422,6 @@ func (h *ActionHandler) DeleteProject(ctx context.Context, projectRef string) er
 func (h *ActionHandler) ProjectCreateRun(ctx context.Context, projectRef, branch, tag, refName, commitSHA string) error {
 	curUserID := common.CurrentUserID(ctx)
 
-	user, _, err := h.configstoreClient.GetUser(ctx, curUserID)
-	if err != nil {
-		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get user %q", curUserID))
-	}
-
 	p, _, err := h.configstoreClient.GetProject(ctx, projectRef)
 	if err != nil {
 		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
@@ -484,28 +435,7 @@ func (h *ActionHandler) ProjectCreateRun(ctx context.Context, projectRef, branch
 		return util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
 	}
 
-	rs, _, err := h.configstoreClient.GetRemoteSource(ctx, p.RemoteSourceID)
-	if err != nil {
-		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get remote source %q", p.RemoteSourceID))
-	}
-
-	linkedAccounts, _, err := h.configstoreClient.GetUserLinkedAccounts(ctx, user.ID)
-	if err != nil {
-		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get user %q linked accounts", user.ID))
-	}
-
-	var la *cstypes.LinkedAccount
-	for _, v := range linkedAccounts {
-		if v.RemoteSourceID == rs.ID {
-			la = v
-			break
-		}
-	}
-	if la == nil {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("user doesn't have a linked account for remote source %q", rs.Name))
-	}
-
-	gitSource, err := h.GetGitSource(ctx, rs, user.Name, la)
+	gitSource, rs, _, err := h.GetUserGitSource(ctx, p.RemoteSourceID, curUserID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create gitsource client")
 	}
@@ -656,4 +586,53 @@ func (h *ActionHandler) getRemoteRepoAccessData(ctx context.Context, linkedAccou
 	}
 
 	return user, rs, la, nil
+}
+
+func (h *ActionHandler) RefreshRemoteRepositoryInfo(ctx context.Context, projectRef string) (*csapitypes.Project, error) {
+	p, err := h.GetProject(ctx, projectRef)
+	if err != nil {
+		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
+	}
+
+	isProjectOwner, err := h.IsProjectOwner(ctx, p.OwnerType, p.OwnerID)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to determine ownership")
+	}
+	if !isProjectOwner {
+		return nil, util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
+	}
+
+	gitSource, _, _, err := h.GetUserGitSource(ctx, p.RemoteSourceID, common.CurrentUserID(ctx))
+	if err != nil {
+		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get remote source %q", p.RemoteSourceID))
+	}
+
+	repoInfo, err := gitSource.GetRepoInfo(p.RepositoryPath)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get repository info from gitsource")
+	}
+
+	creq := &csapitypes.CreateUpdateProjectRequest{
+		Name:                       p.Name,
+		Parent:                     p.Parent,
+		Visibility:                 p.Visibility,
+		RemoteRepositoryConfigType: p.RemoteRepositoryConfigType,
+		RemoteSourceID:             p.RemoteSourceID,
+		LinkedAccountID:            p.LinkedAccountID,
+		RepositoryID:               p.RepositoryID,
+		RepositoryPath:             p.RepositoryPath,
+		SSHPrivateKey:              p.SSHPrivateKey,
+		SkipSSHHostKeyCheck:        p.SkipSSHHostKeyCheck,
+		PassVarsToForkedPR:         p.PassVarsToForkedPR,
+		DefaultBranch:              repoInfo.DefaultBranch,
+	}
+
+	h.log.Info().Msgf("updating project")
+	rp, _, err := h.configstoreClient.UpdateProject(ctx, p.ID, creq)
+	if err != nil {
+		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to update project"))
+	}
+	h.log.Info().Msgf("project %s updated, ID: %s", p.Name, p.ID)
+
+	return rp, nil
 }

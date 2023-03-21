@@ -357,7 +357,7 @@ func (c *Client) GetUser(ctx context.Context, userRef string) (*gwapitypes.UserR
 	return user, resp, errors.WithStack(err)
 }
 
-func (c *Client) GetUsers(ctx context.Context, start string, limit int, asc bool) ([]*gwapitypes.UserResponse, *http.Response, error) {
+func (c *Client) GetUsers(ctx context.Context, start string, limit int, asc bool) ([]*gwapitypes.PrivateUserResponse, *http.Response, error) {
 	q := url.Values{}
 	if start != "" {
 		q.Add("start", start)
@@ -369,9 +369,23 @@ func (c *Client) GetUsers(ctx context.Context, start string, limit int, asc bool
 		q.Add("asc", "")
 	}
 
-	users := []*gwapitypes.UserResponse{}
+	users := []*gwapitypes.PrivateUserResponse{}
 	resp, err := c.getParsedResponse(ctx, "GET", "/users", q, jsonContent, nil, &users)
 	return users, resp, errors.WithStack(err)
+}
+
+func (c *Client) GetUserByLinkedAccountRemoteUserAndSource(ctx context.Context, remoteUserID, remoteSourceRef string) (*gwapitypes.PrivateUserResponse, *http.Response, error) {
+	q := url.Values{}
+	q.Add("query_type", "byremoteuser")
+	q.Add("remoteuserid", remoteUserID)
+	q.Add("remotesourceref", remoteSourceRef)
+
+	users := []*gwapitypes.PrivateUserResponse{}
+	resp, err := c.getParsedResponse(ctx, "GET", "/users", q, jsonContent, nil, &users)
+	if err != nil {
+		return nil, resp, errors.WithStack(err)
+	}
+	return users[0], resp, errors.WithStack(err)
 }
 
 func (c *Client) CreateUser(ctx context.Context, req *gwapitypes.CreateUserRequest) (*gwapitypes.UserResponse, *http.Response, error) {
@@ -411,6 +425,17 @@ func (c *Client) CreateUserLA(ctx context.Context, userRef string, req *gwapityp
 
 func (c *Client) DeleteUserLA(ctx context.Context, userRef, laID string) (*http.Response, error) {
 	return c.getResponse(ctx, "DELETE", fmt.Sprintf("/users/%s/linkedaccounts/%s", userRef, laID), nil, jsonContent, nil)
+}
+
+func (c *Client) Login(ctx context.Context, req *gwapitypes.LoginUserRequest) (*gwapitypes.LoginUserResponse, *http.Response, error) {
+	reqj, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, errors.WithStack(err)
+	}
+
+	loginResponse := new(gwapitypes.LoginUserResponse)
+	resp, err := c.getParsedResponse(ctx, "POST", "/auth/login", nil, jsonContent, bytes.NewReader(reqj), loginResponse)
+	return loginResponse, resp, errors.WithStack(err)
 }
 
 func (c *Client) RegisterUser(ctx context.Context, req *gwapitypes.RegisterUserRequest) (*gwapitypes.RegisterUserResponse, *http.Response, error) {
@@ -587,6 +612,29 @@ func (c *Client) DeleteRemoteSource(ctx context.Context, rsRef string) (*http.Re
 	return c.getResponse(ctx, "DELETE", fmt.Sprintf("/remotesources/%s", rsRef), nil, jsonContent, nil)
 }
 
+func (c *Client) GetOrg(ctx context.Context, orgRef string) (*gwapitypes.OrgResponse, *http.Response, error) {
+	res := &gwapitypes.OrgResponse{}
+	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/orgs/%s", orgRef), nil, jsonContent, nil, &res)
+	return res, resp, errors.WithStack(err)
+}
+
+func (c *Client) GetOrgs(ctx context.Context, start string, limit int, asc bool) ([]*gwapitypes.OrgResponse, *http.Response, error) {
+	q := url.Values{}
+	if start != "" {
+		q.Add("start", start)
+	}
+	if limit > 0 {
+		q.Add("limit", strconv.Itoa(limit))
+	}
+	if asc {
+		q.Add("asc", "")
+	}
+
+	orgs := []*gwapitypes.OrgResponse{}
+	resp, err := c.getParsedResponse(ctx, "GET", "/orgs", q, jsonContent, nil, &orgs)
+	return orgs, resp, errors.WithStack(err)
+}
+
 func (c *Client) CreateOrg(ctx context.Context, req *gwapitypes.CreateOrgRequest) (*gwapitypes.OrgResponse, *http.Response, error) {
 	reqj, err := json.Marshal(req)
 	if err != nil {
@@ -600,6 +648,17 @@ func (c *Client) CreateOrg(ctx context.Context, req *gwapitypes.CreateOrgRequest
 
 func (c *Client) DeleteOrg(ctx context.Context, orgRef string) (*http.Response, error) {
 	return c.getResponse(ctx, "DELETE", fmt.Sprintf("/orgs/%s", orgRef), nil, jsonContent, nil)
+}
+
+func (c *Client) UpdateOrg(ctx context.Context, orgRef string, req *gwapitypes.UpdateOrgRequest) (*gwapitypes.OrgResponse, *http.Response, error) {
+	reqj, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, errors.WithStack(err)
+	}
+
+	org := new(gwapitypes.OrgResponse)
+	resp, err := c.getParsedResponse(ctx, "PUT", fmt.Sprintf("/orgs/%s", orgRef), nil, jsonContent, bytes.NewReader(reqj), org)
+	return org, resp, errors.WithStack(err)
 }
 
 func (c *Client) AddOrgMember(ctx context.Context, orgRef, userRef string, role gwapitypes.MemberRole) (*gwapitypes.AddOrgMemberResponse, *http.Response, error) {
@@ -636,4 +695,82 @@ func (c *Client) GetUserOrgs(ctx context.Context) ([]*gwapitypes.UserOrgsRespons
 	userOrgs := []*gwapitypes.UserOrgsResponse{}
 	resp, err := c.getParsedResponse(ctx, "GET", "/user/orgs", nil, jsonContent, nil, &userOrgs)
 	return userOrgs, resp, errors.WithStack(err)
+}
+
+func (c *Client) GetUserRemoteRepos(ctx context.Context, rsRef string) ([]*gwapitypes.RemoteRepoResponse, *http.Response, error) {
+	remoteRepos := []*gwapitypes.RemoteRepoResponse{}
+	resp, err := c.getParsedResponse(ctx, "GET", path.Join("/user/remoterepos", url.PathEscape(rsRef)), nil, jsonContent, nil, &remoteRepos)
+	return remoteRepos, resp, err
+}
+
+func (c *Client) RefreshRemoteRepo(ctx context.Context, projectRef string) (*gwapitypes.ProjectResponse, *http.Response, error) {
+	project := new(gwapitypes.ProjectResponse)
+	resp, err := c.getParsedResponse(ctx, "POST", path.Join("/projects", url.PathEscape(projectRef), "/refreshremoterepo"), nil, jsonContent, nil, project)
+	return project, resp, err
+}
+
+func (c *Client) GetOrgInvitations(ctx context.Context, orgRef string) ([]*gwapitypes.OrgInvitationResponse, *http.Response, error) {
+	orgInvitations := []*gwapitypes.OrgInvitationResponse{}
+	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/orgs/%s/invitations", orgRef), nil, jsonContent, nil, &orgInvitations)
+	return orgInvitations, resp, errors.WithStack(err)
+}
+
+func (c *Client) GetUserOrgInvitations(ctx context.Context) ([]*gwapitypes.OrgInvitationResponse, *http.Response, error) {
+	orgInvitations := []*gwapitypes.OrgInvitationResponse{}
+	resp, err := c.getParsedResponse(ctx, "GET", "/user/org_invitations", nil, jsonContent, nil, &orgInvitations)
+	return orgInvitations, resp, errors.WithStack(err)
+}
+
+func (c *Client) GetOrgInvitation(ctx context.Context, orgRef, userRef string) (*gwapitypes.OrgInvitationResponse, *http.Response, error) {
+	orgInvitation := new(gwapitypes.OrgInvitationResponse)
+	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/orgs/%s/invitations/%s", orgRef, userRef), nil, jsonContent, nil, orgInvitation)
+	return orgInvitation, resp, errors.WithStack(err)
+}
+
+func (c *Client) CreateOrgInvitation(ctx context.Context, orgRef string, req *gwapitypes.CreateOrgInvitationRequest) (*gwapitypes.OrgInvitationResponse, *http.Response, error) {
+	reqj, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, errors.WithStack(err)
+	}
+
+	orgInvitation := new(gwapitypes.OrgInvitationResponse)
+	resp, err := c.getParsedResponse(ctx, "POST", fmt.Sprintf("/orgs/%s/invitations", orgRef), nil, jsonContent, bytes.NewReader(reqj), orgInvitation)
+	return orgInvitation, resp, errors.WithStack(err)
+}
+
+func (c *Client) DeleteOrgInvitation(ctx context.Context, orgRef string, userRef string) (*http.Response, error) {
+	resp, err := c.getResponse(ctx, "DELETE", fmt.Sprintf("/orgs/%s/invitations/%s", orgRef, userRef), nil, jsonContent, nil)
+	return resp, errors.WithStack(err)
+}
+
+func (c *Client) UserOrgInvitationAction(ctx context.Context, orgRef string, req *gwapitypes.OrgInvitationActionRequest) (*http.Response, error) {
+	reqj, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	resp, err := c.getResponse(ctx, "PUT", fmt.Sprintf("/user/org_invitations/%s/actions", orgRef), nil, jsonContent, bytes.NewReader(reqj))
+	return resp, errors.WithStack(err)
+}
+
+func (c *Client) GetMaintenanceStatus(ctx context.Context, serviceName string) (*gwapitypes.MaintenanceStatusResponse, *http.Response, error) {
+	maintenanceStatus := new(gwapitypes.MaintenanceStatusResponse)
+	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/maintenance/%s", serviceName), nil, jsonContent, nil, maintenanceStatus)
+	return maintenanceStatus, resp, errors.WithStack(err)
+}
+
+func (c *Client) EnableMaintenance(ctx context.Context, serviceName string) (*http.Response, error) {
+	return c.getResponse(ctx, "PUT", fmt.Sprintf("/maintenance/%s", serviceName), nil, jsonContent, nil)
+}
+
+func (c *Client) DisableMaintenance(ctx context.Context, serviceName string) (*http.Response, error) {
+	return c.getResponse(ctx, "DELETE", fmt.Sprintf("/maintenance/%s", serviceName), nil, jsonContent, nil)
+}
+
+func (c *Client) Export(ctx context.Context, serviceName string) (*http.Response, error) {
+	return c.getResponse(ctx, "GET", fmt.Sprintf("/export/%s", serviceName), nil, jsonContent, nil)
+}
+
+func (c *Client) Import(ctx context.Context, serviceName string, r io.Reader) (*http.Response, error) {
+	return c.getResponse(ctx, "POST", fmt.Sprintf("/import/%s", serviceName), nil, jsonContent, r)
 }

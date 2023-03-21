@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"agola.io/agola/internal/config"
 	"agola.io/agola/internal/errors"
@@ -92,7 +93,7 @@ func TestGenTasksLevels(t *testing.T) {
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -105,7 +106,7 @@ func TestGenTasksLevels(t *testing.T) {
 					ID:    "2",
 					Level: 1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -117,14 +118,14 @@ func TestGenTasksLevels(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -137,21 +138,21 @@ func TestGenTasksLevels(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
+						"3": {TaskID: "3"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -164,21 +165,21 @@ func TestGenTasksLevels(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
+						"3": {TaskID: "3"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 			},
@@ -241,7 +242,7 @@ func TestGetAllParents(t *testing.T) {
 				},
 			},
 			out: map[string][]string{
-				"1": []string{},
+				"1": {},
 			},
 		},
 		{
@@ -257,8 +258,8 @@ func TestGetAllParents(t *testing.T) {
 				},
 			},
 			out: map[string][]string{
-				"1": []string{},
-				"2": []string{},
+				"1": {},
+				"2": {},
 			},
 		},
 		{
@@ -268,12 +269,12 @@ func TestGetAllParents(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
 			out: map[string][]string{
-				"1": []string{"1"},
+				"1": {"1"},
 			},
 		},
 		{
@@ -287,13 +288,13 @@ func TestGetAllParents(t *testing.T) {
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
 			out: map[string][]string{
-				"1": []string{},
-				"2": []string{"1"},
+				"1": {},
+				"2": {"1"},
 			},
 		},
 		{
@@ -303,22 +304,22 @@ func TestGetAllParents(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
+						"2": {TaskID: "2"},
+						"3": {TaskID: "3"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"4": &rstypes.RunConfigTaskDepend{TaskID: "4"},
+						"4": {TaskID: "4"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"5": &rstypes.RunConfigTaskDepend{TaskID: "5"},
+						"5": {TaskID: "5"},
 					},
 				},
 				{
@@ -331,11 +332,11 @@ func TestGetAllParents(t *testing.T) {
 				},
 			},
 			out: map[string][]string{
-				"1": []string{"2", "3", "4", "5"},
-				"2": []string{"4"},
-				"3": []string{"5"},
-				"4": []string{},
-				"5": []string{},
+				"1": {"2", "3", "4", "5"},
+				"2": {"4"},
+				"3": {"5"},
+				"4": {},
+				"5": {},
 			},
 		},
 		{
@@ -345,20 +346,20 @@ func TestGetAllParents(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
 			out: map[string][]string{
-				"1": []string{"2", "1"},
-				"2": []string{"1", "2"},
+				"1": {"2", "1"},
+				"2": {"1", "2"},
 			},
 		},
 		{
@@ -368,28 +369,28 @@ func TestGetAllParents(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
+						"3": {TaskID: "3"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
 			out: map[string][]string{
-				"1": []string{"2", "3", "1"},
-				"2": []string{"3", "1", "2"},
-				"3": []string{"1", "2", "3"},
+				"1": {"2", "3", "1"},
+				"2": {"3", "1", "2"},
+				"3": {"1", "2", "3"},
 			},
 		},
 		{
@@ -399,28 +400,28 @@ func TestGetAllParents(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
+						"3": {TaskID: "3"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 			},
 			out: map[string][]string{
-				"1": []string{"2", "3"},
-				"2": []string{"3", "2"},
-				"3": []string{"2", "3"},
+				"1": {"2", "3"},
+				"2": {"3", "2"},
+				"3": {"2", "3"},
 			},
 		},
 	}
@@ -496,7 +497,7 @@ func TestCheckRunConfig(t *testing.T) {
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -508,14 +509,14 @@ func TestCheckRunConfig(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -533,21 +534,21 @@ func TestCheckRunConfig(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
+						"3": {TaskID: "3"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -566,21 +567,21 @@ func TestCheckRunConfig(t *testing.T) {
 					ID:    "1",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
+						"3": {TaskID: "3"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 			},
@@ -602,15 +603,15 @@ func TestCheckRunConfig(t *testing.T) {
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"2": {TaskID: "2"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -627,22 +628,22 @@ func TestCheckRunConfig(t *testing.T) {
 					ID:    "2",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"1": {TaskID: "1"},
 					},
 				},
 				{
 					ID:    "3",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"2": &rstypes.RunConfigTaskDepend{TaskID: "2"},
+						"2": {TaskID: "2"},
 					},
 				},
 				{
 					ID:    "4",
 					Level: -1,
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						"3": &rstypes.RunConfigTaskDepend{TaskID: "3"},
-						"1": &rstypes.RunConfigTaskDepend{TaskID: "1"},
+						"3": {TaskID: "3"},
+						"1": {TaskID: "1"},
 					},
 				},
 			},
@@ -693,7 +694,7 @@ func TestGenRunConfig(t *testing.T) {
 			name: "test runconfig generation",
 			in: &config.Config{
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 							"index.docker.io": {
@@ -703,7 +704,7 @@ func TestGenRunConfig(t *testing.T) {
 							},
 						},
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 									"index.docker.io": {
@@ -716,19 +717,19 @@ func TestGenRunConfig(t *testing.T) {
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 											Environment: map[string]config.Value{
-												"ENV01":             config.Value{Type: config.ValueTypeString, Value: "ENV01"},
-												"ENVFROMVARIABLE01": config.Value{Type: config.ValueTypeFromVariable, Value: "variable01"},
+												"ENV01":             {Type: config.ValueTypeString, Value: "ENV01"},
+												"ENVFROMVARIABLE01": {Type: config.ValueTypeFromVariable, Value: "variable01"},
 											},
 											User: "",
 											Volumes: []config.Volume{
-												config.Volume{
+												{
 													Path:  "/mnt/vol01",
 													TmpFS: &config.VolumeTmpFS{},
 												},
-												config.Volume{
+												{
 													Path:  "/mnt/vol01",
 													TmpFS: &config.VolumeTmpFS{Size: resource.NewQuantity(1024*1024*1024, resource.BinarySI)},
 												},
@@ -737,8 +738,8 @@ func TestGenRunConfig(t *testing.T) {
 									},
 								},
 								Environment: map[string]config.Value{
-									"ENV01":             config.Value{Type: config.ValueTypeString, Value: "ENV01"},
-									"ENVFROMVARIABLE01": config.Value{Type: config.ValueTypeFromVariable, Value: "variable01"},
+									"ENV01":             {Type: config.ValueTypeString, Value: "ENV01"},
+									"ENVFROMVARIABLE01": {Type: config.ValueTypeFromVariable, Value: "variable01"},
 								},
 								WorkingDir: "",
 								Shell:      "",
@@ -765,8 +766,8 @@ func TestGenRunConfig(t *testing.T) {
 										},
 										Command: "command03",
 										Environment: map[string]config.Value{
-											"ENV01":             config.Value{Type: config.ValueTypeString, Value: "ENV01"},
-											"ENVFROMVARIABLE01": config.Value{Type: config.ValueTypeFromVariable, Value: "variable01"},
+											"ENV01":             {Type: config.ValueTypeString, Value: "ENV01"},
+											"ENVFROMVARIABLE01": {Type: config.ValueTypeFromVariable, Value: "variable01"},
 										},
 									},
 								},
@@ -792,7 +793,7 @@ func TestGenRunConfig(t *testing.T) {
 				"registry_username": "yourregistryusername",
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{
@@ -811,11 +812,11 @@ func TestGenRunConfig(t *testing.T) {
 									"ENVFROMVARIABLE01": "VARVALUE01",
 								},
 								Volumes: []rstypes.Volume{
-									rstypes.Volume{
+									{
 										Path:  "/mnt/vol01",
 										TmpFS: &rstypes.VolumeTmpFS{},
 									},
-									rstypes.Volume{
+									{
 										Path:  "/mnt/vol01",
 										TmpFS: &rstypes.VolumeTmpFS{Size: 1024 * 1024 * 1024},
 									},
@@ -841,7 +842,7 @@ func TestGenRunConfig(t *testing.T) {
 			name: "test run auth used for task undefined auth",
 			in: &config.Config{
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 							"index.docker.io": {
@@ -851,13 +852,13 @@ func TestGenRunConfig(t *testing.T) {
 							},
 						},
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								Runtime: &config.Runtime{
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 										},
 									},
@@ -881,7 +882,7 @@ func TestGenRunConfig(t *testing.T) {
 				"password":   "yourregistrypassword",
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{
@@ -912,7 +913,7 @@ func TestGenRunConfig(t *testing.T) {
 			name: "test run auth override by task auth",
 			in: &config.Config{
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 							"index.docker.io": {
@@ -927,7 +928,7 @@ func TestGenRunConfig(t *testing.T) {
 							},
 						},
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 									"index.docker.io": {
@@ -945,7 +946,7 @@ func TestGenRunConfig(t *testing.T) {
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 										},
 									},
@@ -970,7 +971,7 @@ func TestGenRunConfig(t *testing.T) {
 				"password":          "myregistrypassword",
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{
@@ -1011,28 +1012,28 @@ func TestGenRunConfig(t *testing.T) {
 			name: "test run task depends on_skipped",
 			in: &config.Config{
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								Runtime: &config.Runtime{
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 										},
 									},
 								},
 							},
-							&config.Task{
+							{
 								Name: "task02",
 								Runtime: &config.Runtime{
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 										},
 									},
@@ -1051,7 +1052,7 @@ func TestGenRunConfig(t *testing.T) {
 				},
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					Runtime: &rstypes.Runtime{Type: rstypes.RuntimeType("pod"),
@@ -1068,11 +1069,11 @@ func TestGenRunConfig(t *testing.T) {
 					Environment:          map[string]string{},
 					Steps:                rstypes.Steps{},
 				},
-				uuid.New("task02").String(): &rstypes.RunConfigTask{
+				uuid.New("task02").String(): {
 					ID:   uuid.New("task02").String(),
 					Name: "task02",
 					Depends: map[string]*rstypes.RunConfigTaskDepend{
-						uuid.New("task01").String(): &rstypes.RunConfigTaskDepend{
+						uuid.New("task01").String(): {
 							TaskID:     uuid.New("task01").String(),
 							Conditions: []rstypes.RunConfigTaskDependCondition{rstypes.RunConfigTaskDependConditionOnSkipped},
 						},
@@ -1103,16 +1104,16 @@ func TestGenRunConfig(t *testing.T) {
 					},
 				},
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								Runtime: &config.Runtime{
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 										},
 									},
@@ -1128,7 +1129,7 @@ func TestGenRunConfig(t *testing.T) {
 				},
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{
@@ -1163,7 +1164,7 @@ func TestGenRunConfig(t *testing.T) {
 					},
 				},
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 							"index.docker.io": {
@@ -1172,13 +1173,13 @@ func TestGenRunConfig(t *testing.T) {
 							},
 						},
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								Runtime: &config.Runtime{
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 										},
 									},
@@ -1194,7 +1195,7 @@ func TestGenRunConfig(t *testing.T) {
 				},
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{
@@ -1229,7 +1230,7 @@ func TestGenRunConfig(t *testing.T) {
 					},
 				},
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 							"index.docker.io": {
@@ -1238,7 +1239,7 @@ func TestGenRunConfig(t *testing.T) {
 							},
 						},
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 									"index.docker.io": {
@@ -1250,7 +1251,7 @@ func TestGenRunConfig(t *testing.T) {
 									Type: "pod",
 									Arch: "",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 										},
 									},
@@ -1266,7 +1267,7 @@ func TestGenRunConfig(t *testing.T) {
 				},
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{
@@ -1295,7 +1296,7 @@ func TestGenRunConfig(t *testing.T) {
 			name: "test runconfig generation with encoded value type",
 			in: &config.Config{
 				Runs: []*config.Run{
-					&config.Run{
+					{
 						Name: "run01",
 						DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 							"index.docker.io": {
@@ -1304,7 +1305,7 @@ func TestGenRunConfig(t *testing.T) {
 							},
 						},
 						Tasks: []*config.Task{
-							&config.Task{
+							{
 								Name: "task01",
 								DockerRegistriesAuth: map[string]*config.DockerRegistryAuth{
 									"index.docker.io": {
@@ -1315,7 +1316,7 @@ func TestGenRunConfig(t *testing.T) {
 								Runtime: &config.Runtime{
 									Type: "pod",
 									Containers: []*config.Container{
-										&config.Container{
+										{
 											Image: "image01",
 											User:  "",
 										},
@@ -1333,7 +1334,7 @@ func TestGenRunConfig(t *testing.T) {
 				"auth": "eW91cnJlZ2lzdHJ5dXNlcm5hbWU6cGFzc3dvcmQy",
 			},
 			out: map[string]*rstypes.RunConfigTask{
-				uuid.New("task01").String(): &rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
 					ID:   uuid.New("task01").String(),
 					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
 					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{
@@ -1355,6 +1356,162 @@ func TestGenRunConfig(t *testing.T) {
 					Environment: map[string]string{},
 					Steps:       rstypes.Steps{},
 					Skip:        false,
+				},
+			},
+		},
+		{
+			name: "test runconfig generation task timeout global",
+			in: &config.Config{
+				Runs: []*config.Run{
+					{
+						Name: "run01",
+						Tasks: []*config.Task{
+							{
+								Name: "task01",
+								Runtime: &config.Runtime{
+									Type: "pod",
+									Arch: "",
+									Containers: []*config.Container{
+										{
+											Image: "image01",
+										},
+									},
+								},
+
+								Depends:    []*config.Depend{},
+								WorkingDir: "",
+								Shell:      "",
+								User:       "",
+							},
+						},
+					},
+				},
+				TaskTimeoutInterval: &types.Duration{Duration: 10 * time.Second},
+			},
+			out: map[string]*rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
+					ID:   uuid.New("task01").String(),
+					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
+					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{},
+					TaskTimeoutInterval:  10 * time.Second,
+					Runtime: &rstypes.Runtime{Type: rstypes.RuntimeType("pod"),
+						Containers: []*rstypes.Container{
+							{
+								Image:       "image01",
+								Volumes:     []rstypes.Volume{},
+								Environment: map[string]string{},
+							},
+						},
+					},
+					Environment: map[string]string{},
+					Skip:        false,
+					Steps:       rstypes.Steps{},
+					Shell:       "/bin/sh -e",
+				},
+			},
+		},
+		{
+			name: "test global task timeout override by run",
+			in: &config.Config{
+				Runs: []*config.Run{
+					{
+						Name: "run01",
+						Tasks: []*config.Task{
+							{
+								Name: "task01",
+								Runtime: &config.Runtime{
+									Type: "pod",
+									Arch: "",
+									Containers: []*config.Container{
+										{
+											Image: "image01",
+										},
+									},
+								},
+
+								Depends:    []*config.Depend{},
+								WorkingDir: "",
+								Shell:      "",
+								User:       "",
+							},
+						},
+						TaskTimeoutInterval: &types.Duration{Duration: 15 * time.Second},
+					},
+				},
+				TaskTimeoutInterval: &types.Duration{Duration: 10 * time.Second},
+			},
+			out: map[string]*rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
+					ID:   uuid.New("task01").String(),
+					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
+					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{},
+					TaskTimeoutInterval:  15 * time.Second,
+					Runtime: &rstypes.Runtime{Type: rstypes.RuntimeType("pod"),
+						Containers: []*rstypes.Container{
+							{
+								Image:       "image01",
+								Volumes:     []rstypes.Volume{},
+								Environment: map[string]string{},
+							},
+						},
+					},
+					Environment: map[string]string{},
+					Skip:        false,
+					Steps:       rstypes.Steps{},
+					Shell:       "/bin/sh -e",
+				},
+			},
+		},
+		{
+			name: "test global task timeout override by task",
+			in: &config.Config{
+				Runs: []*config.Run{
+					{
+						Name: "run01",
+						Tasks: []*config.Task{
+							{
+								Name:                "task01",
+								TaskTimeoutInterval: &types.Duration{Duration: 20 * time.Second},
+								Runtime: &config.Runtime{
+									Type: "pod",
+									Arch: "",
+									Containers: []*config.Container{
+										{
+											Image: "image01",
+										},
+									},
+								},
+
+								Depends:    []*config.Depend{},
+								WorkingDir: "",
+								Shell:      "",
+								User:       "",
+							},
+						},
+						TaskTimeoutInterval: &types.Duration{Duration: 15 * time.Second},
+					},
+				},
+				TaskTimeoutInterval: &types.Duration{Duration: 10 * time.Second},
+			},
+			out: map[string]*rstypes.RunConfigTask{
+				uuid.New("task01").String(): {
+					ID:   uuid.New("task01").String(),
+					Name: "task01", Depends: map[string]*rstypes.RunConfigTaskDepend{},
+					DockerRegistriesAuth: map[string]rstypes.DockerRegistryAuth{},
+					TaskTimeoutInterval:  20 * time.Second,
+					Runtime: &rstypes.Runtime{Type: rstypes.RuntimeType("pod"),
+						Containers: []*rstypes.Container{
+							{
+								Image:       "image01",
+								Volumes:     []rstypes.Volume{},
+								Environment: map[string]string{},
+							},
+						},
+					},
+					Environment: map[string]string{},
+					Skip:        false,
+					Steps:       rstypes.Steps{},
+					Shell:       "/bin/sh -e",
 				},
 			},
 		},

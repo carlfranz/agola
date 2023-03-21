@@ -165,7 +165,7 @@ func (h *ActionHandler) CreateProjectGroup(ctx context.Context, req *CreateUpdat
 			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("project group with name %q, path %q already exists", req.Name, pp))
 		}
 
-		projectGroup = types.NewProjectGroup()
+		projectGroup = types.NewProjectGroup(tx)
 		projectGroup.Name = req.Name
 		projectGroup.Parent = req.Parent
 		projectGroup.Visibility = req.Visibility
@@ -304,4 +304,34 @@ func (h *ActionHandler) DeleteProjectGroup(ctx context.Context, projectGroupRef 
 	}
 
 	return errors.WithStack(err)
+}
+
+func (h *ActionHandler) getAllProjectGroupSubgroups(tx *sql.Tx, projectGroupRef string) ([]*types.ProjectGroup, error) {
+	resp := make([]*types.ProjectGroup, 0)
+
+	projectGroup, err := h.d.GetProjectGroup(tx, projectGroupRef)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	if projectGroup == nil {
+		return nil, util.NewAPIError(util.ErrNotExist, errors.Errorf("project group %q doesn't exist", projectGroupRef))
+	}
+
+	projectGroups, err := h.d.GetProjectGroupSubgroups(tx, projectGroup.ID)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	for _, subgroup := range projectGroups {
+		resp = append(resp, subgroup)
+
+		subSubgroups, err := h.getAllProjectGroupSubgroups(tx, subgroup.ID)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+
+		resp = append(resp, subSubgroups...)
+	}
+
+	return resp, nil
 }

@@ -17,7 +17,7 @@ package driver
 import (
 	"bytes"
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -58,13 +58,13 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -76,13 +76,13 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -114,14 +114,14 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 					Env:   env,
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -166,16 +166,16 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 				},
-				&ContainerConfig{
+				{
 					Image: "nginx:1.16",
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -187,16 +187,16 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 				},
-				&ContainerConfig{
+				{
 					Image: "nginx:1.16",
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -226,13 +226,13 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -269,16 +269,16 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 				},
-				&ContainerConfig{
+				{
 					Image: "nginx:1.16",
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -315,16 +315,16 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 				},
-				&ContainerConfig{
+				{
 					Image: "nginx:1.16",
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -368,7 +368,7 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 					Volumes: []Volume{
@@ -382,7 +382,7 @@ func TestDockerPod(t *testing.T) {
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -409,7 +409,7 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 					Volumes: []Volume{
@@ -421,7 +421,7 @@ func TestDockerPod(t *testing.T) {
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -448,7 +448,7 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 					Volumes: []Volume{
@@ -468,7 +468,7 @@ func TestDockerPod(t *testing.T) {
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -495,7 +495,7 @@ func TestDockerPod(t *testing.T) {
 			ID:     uuid.Must(uuid.NewV4()).String(),
 			TaskID: uuid.Must(uuid.NewV4()).String(),
 			Containers: []*ContainerConfig{
-				&ContainerConfig{
+				{
 					Cmd:   []string{"cat"},
 					Image: "busybox",
 					Volumes: []Volume{
@@ -513,7 +513,7 @@ func TestDockerPod(t *testing.T) {
 				},
 			},
 			InitVolumeDir: "/tmp/agola",
-		}, ioutil.Discard)
+		}, io.Discard)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}

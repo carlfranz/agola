@@ -3,6 +3,7 @@ package types
 import (
 	"time"
 
+	"agola.io/agola/internal/sql"
 	stypes "agola.io/agola/services/types"
 
 	"github.com/gofrs/uuid"
@@ -79,12 +80,15 @@ type ExecutorTaskSpecData struct {
 	CachePrefix string `json:"cache_prefix,omitempty"`
 
 	Steps Steps `json:"steps,omitempty"`
+
+	TaskTimeoutInterval time.Duration `json:"task_timeout_interval"`
 }
 
 type ExecutorTaskStatus struct {
 	ID string `json:"id,omitempty"`
 
-	Phase ExecutorTaskPhase `json:"phase,omitempty"`
+	Phase    ExecutorTaskPhase `json:"phase,omitempty"`
+	Timedout bool              `json:"timedout,omitempty"`
 
 	FailError string `json:"fail_error,omitempty"`
 
@@ -110,14 +114,15 @@ type WorkspaceOperation struct {
 	Overwrite bool   `json:"overwrite,omitempty"`
 }
 
-func NewExecutorTask() *ExecutorTask {
+func NewExecutorTask(tx *sql.Tx) *ExecutorTask {
 	return &ExecutorTask{
 		TypeMeta: stypes.TypeMeta{
 			Kind:    ExecutorTaskKind,
 			Version: ExecutorTaskVersion,
 		},
 		ObjectMeta: stypes.ObjectMeta{
-			ID: uuid.Must(uuid.NewV4()).String(),
+			ID:   uuid.Must(uuid.NewV4()).String(),
+			TxID: tx.ID(),
 		},
 	}
 }

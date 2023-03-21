@@ -21,6 +21,7 @@ import (
 	"agola.io/agola/internal/services/configstore/db"
 	"agola.io/agola/internal/sql"
 	"agola.io/agola/internal/util"
+	csapitypes "agola.io/agola/services/configstore/api/types"
 	"agola.io/agola/services/configstore/types"
 )
 
@@ -102,7 +103,7 @@ func (h *ActionHandler) CreateOrg(ctx context.Context, req *CreateOrgRequest) (*
 			}
 		}
 
-		org = types.NewOrganization()
+		org = types.NewOrganization(tx)
 		org.Name = req.Name
 		org.Visibility = req.Visibility
 		org.CreatorUserID = req.CreatorUserID
@@ -113,7 +114,7 @@ func (h *ActionHandler) CreateOrg(ctx context.Context, req *CreateOrgRequest) (*
 
 		if org.CreatorUserID != "" {
 			// add the creator as org member with role owner
-			orgmember := types.NewOrganizationMember()
+			orgmember := types.NewOrganizationMember(tx)
 			orgmember.OrganizationID = org.ID
 			orgmember.UserID = org.CreatorUserID
 			orgmember.MemberRole = types.MemberRoleOwner
@@ -124,7 +125,7 @@ func (h *ActionHandler) CreateOrg(ctx context.Context, req *CreateOrgRequest) (*
 		}
 
 		// create root org project group
-		pg := types.NewProjectGroup()
+		pg := types.NewProjectGroup(tx)
 		// use same org visibility
 		pg.Visibility = org.Visibility
 		pg.Parent = types.Parent{
@@ -145,13 +146,49 @@ func (h *ActionHandler) CreateOrg(ctx context.Context, req *CreateOrgRequest) (*
 	return org, errors.WithStack(err)
 }
 
+type UpdateOrgRequest struct {
+	Visibility types.Visibility
+}
+
+func (h *ActionHandler) UpdateOrg(ctx context.Context, orgRef string, req *UpdateOrgRequest) (*types.Organization, error) {
+	if !types.IsValidVisibility(req.Visibility) {
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid organization visibility"))
+	}
+
+	var org *types.Organization
+	err := h.d.Do(ctx, func(tx *sql.Tx) error {
+		var err error
+		// check org existance
+		org, err = h.d.GetOrg(tx, orgRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if org == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("org %q not exists", orgRef))
+		}
+
+		org.Visibility = req.Visibility
+
+		if err := h.d.UpdateOrganization(tx, org); err != nil {
+			return errors.WithStack(err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return org, errors.WithStack(err)
+}
+
 func (h *ActionHandler) DeleteOrg(ctx context.Context, orgRef string) error {
 	var org *types.Organization
 
 	err := h.d.Do(ctx, func(tx *sql.Tx) error {
 		var err error
 		// check org existance
-		org, err = h.d.GetOrgByName(tx, orgRef)
+		org, err = h.d.GetOrg(tx, orgRef)
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -159,7 +196,41 @@ func (h *ActionHandler) DeleteOrg(ctx context.Context, orgRef string) error {
 			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("org %q doesn't exist", orgRef))
 		}
 
-		// TODO(sgotti) delete all project groups, projects etc...
+		orgInvitations, err := h.d.GetOrgInvitations(tx, org.ID)
+		if err != nil {
+			return util.NewAPIError(util.KindFromRemoteError(err), err)
+		}
+		for _, invitation := range orgInvitations {
+			err = h.d.DeleteOrgInvitation(tx, invitation.ID)
+			if err != nil {
+				return util.NewAPIError(util.KindFromRemoteError(err), err)
+			}
+		}
+
+		// delete all projects and groups
+		subgroups, err := h.getAllProjectGroupSubgroups(tx, "org/"+org.Name)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		for _, subgroup := range subgroups {
+			projects, err := h.d.GetProjectGroupProjects(tx, subgroup.ID)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+
+			for _, project := range projects {
+				err = h.d.DeleteProject(tx, project.ID)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+			}
+
+			err = h.d.DeleteProjectGroup(tx, subgroup.ID)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+		}
+
 		if err := h.d.DeleteOrganization(tx, org.ID); err != nil {
 			return errors.WithStack(err)
 		}
@@ -212,14 +283,26 @@ func (h *ActionHandler) AddOrgMember(ctx context.Context, orgRef, userRef string
 			}
 			orgmember.MemberRole = role
 		} else {
-			orgmember = types.NewOrganizationMember()
+			orgmember = types.NewOrganizationMember(tx)
 			orgmember.OrganizationID = org.ID
 			orgmember.UserID = user.ID
 			orgmember.MemberRole = role
 		}
 
-		if err := h.d.InsertOrganizationMember(tx, orgmember); err != nil {
+		if err := h.d.InsertOrUpdateOrganizationMember(tx, orgmember); err != nil {
 			return errors.WithStack(err)
+		}
+
+		//delete org user invitation if exists
+		orgInvitation, err := h.d.GetOrgInvitationByOrgUserID(tx, org.ID, user.ID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if orgInvitation != nil {
+			err = h.d.DeleteOrgInvitation(tx, orgInvitation.ID)
+			if err != nil {
+				return errors.WithStack(err)
+			}
 		}
 
 		return nil
@@ -271,4 +354,229 @@ func (h *ActionHandler) RemoveOrgMember(ctx context.Context, orgRef, userRef str
 	}
 
 	return errors.WithStack(err)
+}
+
+func (h *ActionHandler) GetOrgInvitations(ctx context.Context, orgRef string) ([]*types.OrgInvitation, error) {
+	var orgInvitations []*types.OrgInvitation
+	err := h.d.Do(ctx, func(tx *sql.Tx) error {
+		org, err := h.d.GetOrg(tx, orgRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if org == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("org %q doesn't exist", orgRef))
+		}
+
+		orgInvitations, err = h.d.GetOrgInvitations(tx, org.ID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		return errors.WithStack(err)
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return orgInvitations, errors.WithStack(err)
+}
+
+func (h *ActionHandler) GetOrgInvitationByUserRef(ctx context.Context, orgRef, userRef string) (*types.OrgInvitation, error) {
+	var orgInvitation *types.OrgInvitation
+	err := h.d.Do(ctx, func(tx *sql.Tx) error {
+		// check existing org
+		org, err := h.d.GetOrg(tx, orgRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if org == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("organization %q doesn't exist", orgRef))
+		}
+		// check existing user
+		user, err := h.d.GetUser(tx, userRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if user == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("user %q doesn't exists", userRef))
+		}
+
+		orgInvitation, err = h.d.GetOrgInvitationByOrgUserID(tx, org.ID, user.ID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		return errors.WithStack(err)
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return orgInvitation, nil
+}
+
+type CreateOrgInvitationRequest struct {
+	UserRef         string
+	OrganizationRef string
+	Role            types.MemberRole
+}
+
+func (h *ActionHandler) CreateOrgInvitation(ctx context.Context, req *CreateOrgInvitationRequest) (*types.OrgInvitation, error) {
+	if req.OrganizationRef == "" {
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("organization ref required"))
+	}
+	if req.UserRef == "" {
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("user ref required"))
+	}
+	if !types.IsValidMemberRole(req.Role) {
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid role"))
+	}
+
+	var orgInvitation *types.OrgInvitation
+	err := h.d.Do(ctx, func(tx *sql.Tx) error {
+		var err error
+
+		org, err := h.d.GetOrg(tx, req.OrganizationRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if org == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("organization %q doesn't exist", req.OrganizationRef))
+		}
+
+		user, err := h.d.GetUser(tx, req.UserRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if user == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("user %q doesn't exist", req.UserRef))
+		}
+
+		// check duplicate org invitation
+		curOrgInvitation, err := h.d.GetOrgInvitationByOrgUserID(tx, org.ID, user.ID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if curOrgInvitation != nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invitation already exists"))
+		}
+
+		orgInvitation = types.NewOrgInvitation(tx)
+		orgInvitation.UserID = user.ID
+		orgInvitation.OrganizationID = org.ID
+		orgInvitation.Role = req.Role
+
+		if err := h.d.InsertOrgInvitation(tx, orgInvitation); err != nil {
+			return errors.WithStack(err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return orgInvitation, errors.WithStack(err)
+}
+
+func (h *ActionHandler) DeleteOrgInvitation(ctx context.Context, orgRef string, userRef string) error {
+	err := h.d.Do(ctx, func(tx *sql.Tx) error {
+		org, err := h.d.GetOrg(tx, orgRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if org == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("org %q doesn't exists", orgRef))
+		}
+		// check existing user
+		user, err := h.d.GetUser(tx, userRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if user == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("user %q doesn't exists", userRef))
+		}
+
+		// check org invitation exists
+		orgInvitation, err := h.d.GetOrgInvitationByOrgUserID(tx, org.ID, user.ID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if orgInvitation == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invitation for org %q, user %q doesn't exists", orgRef, userRef))
+		}
+
+		if err := h.d.DeleteOrgInvitation(tx, orgInvitation.ID); err != nil {
+			return errors.WithStack(err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	return errors.WithStack(err)
+}
+
+type OrgInvitationActionRequest struct {
+	OrgRef  string
+	UserRef string
+	Action  csapitypes.OrgInvitationActionType
+}
+
+func (h *ActionHandler) OrgInvitationAction(ctx context.Context, req *OrgInvitationActionRequest) error {
+	if !req.Action.IsValid() {
+		return errors.Errorf("action is not valid")
+	}
+
+	err := h.d.Do(ctx, func(tx *sql.Tx) error {
+		org, err := h.d.GetOrg(tx, req.OrgRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if org == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("org %q doesn't exists", req.OrgRef))
+		}
+		// check existing user
+		user, err := h.d.GetUser(tx, req.UserRef)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if user == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("user %q doesn't exists", req.UserRef))
+		}
+
+		// check org invitation exists
+		orgInvitation, err := h.d.GetOrgInvitationByOrgUserID(tx, org.ID, user.ID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if orgInvitation == nil {
+			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invitation for org %q, user %q doesn't exists", req.OrgRef, req.UserRef))
+		}
+
+		if req.Action == csapitypes.Accept {
+			orgMember := types.NewOrganizationMember(tx)
+			orgMember.OrganizationID = orgInvitation.OrganizationID
+			orgMember.UserID = orgInvitation.UserID
+			orgMember.MemberRole = orgInvitation.Role
+
+			err = h.d.InsertOrganizationMember(tx, orgMember)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+		}
+		err = h.d.DeleteOrgInvitation(tx, orgInvitation.ID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	return nil
 }

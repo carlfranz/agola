@@ -16,7 +16,6 @@ package objectstorage
 
 import (
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -65,7 +64,7 @@ func (s *S3Storage) Stat(p string) (*ObjectInfo, error) {
 	if err != nil {
 		merr := minio.ToErrorResponse(err)
 		if merr.StatusCode == http.StatusNotFound {
-			return nil, NewErrNotExist(errors.Errorf("object %q doesn't exist", p))
+			return nil, NewErrNotExist(err, "object %q doesn't exist", p)
 		}
 		return nil, errors.WithStack(merr)
 	}
@@ -77,7 +76,7 @@ func (s *S3Storage) ReadObject(filepath string) (ReadSeekCloser, error) {
 	if _, err := s.minioClient.StatObject(s.bucket, filepath, minio.StatObjectOptions{}); err != nil {
 		merr := minio.ToErrorResponse(err)
 		if merr.StatusCode == http.StatusNotFound {
-			return nil, NewErrNotExist(errors.Errorf("object %q doesn't exist", filepath))
+			return nil, NewErrNotExist(err, "object %q doesn't exist", filepath)
 		}
 		return nil, errors.WithStack(merr)
 	}
@@ -100,7 +99,7 @@ func (s *S3Storage) WriteObject(filepath string, data io.Reader, size int64, per
 
 	// hack to know the real file size or minio will do this in memory with big memory usage since s3 doesn't support real streaming of unknown sizes
 	// TODO(sgotti) wait for minio client to expose an api to provide the max object size so we can remove this
-	tmpfile, err := ioutil.TempFile(os.TempDir(), "s3")
+	tmpfile, err := os.CreateTemp(os.TempDir(), "s3")
 	if err != nil {
 		return errors.WithStack(err)
 	}

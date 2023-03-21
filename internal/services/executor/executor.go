@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -54,6 +53,9 @@ const (
 
 	// podCreationTimeout is the maximum time to wait for pod creation.
 	podCreationTimeout = time.Minute * 5
+
+	// tasksTimeoutCleanerInterval is the maximum time to wait for tasks timeout cleaner
+	tasksTimeoutCleanerInterval = time.Second * 2
 )
 
 var (
@@ -777,6 +779,7 @@ func (e *Executor) executeTask(rt *runningTask) {
 	}
 
 	rt.Lock()
+	rt.podStartTime = util.TimeP(time.Now())
 	et.Status.SetupStep.Phase = types.ExecutorTaskPhaseSuccess
 	et.Status.SetupStep.EndTime = util.TimeP(time.Now())
 	if err := e.sendExecutorTaskStatus(ctx, et); err != nil {
@@ -790,7 +793,10 @@ func (e *Executor) executeTask(rt *runningTask) {
 	rt.Lock()
 	if err != nil {
 		e.log.Err(err).Send()
-		if rt.et.Spec.Stop {
+		if rt.timedout {
+			et.Status.Phase = types.ExecutorTaskPhaseFailed
+			et.Status.Timedout = true
+		} else if rt.et.Spec.Stop {
 			et.Status.Phase = types.ExecutorTaskPhaseStopped
 		} else {
 			et.Status.Phase = types.ExecutorTaskPhaseFailed
@@ -841,7 +847,17 @@ func (e *Executor) setupTask(ctx context.Context, rt *runningTask) error {
 
 	e.log.Debug().Msgf("starting pod")
 
-	dockerConfig, err := registry.GenDockerConfig(et.Spec.DockerRegistriesAuth, []string{et.Spec.Containers[0].Image})
+	dockerRegistriesAuth := map[string]registry.DockerRegistryAuth{}
+	for n, v := range et.Spec.DockerRegistriesAuth {
+		dockerRegistriesAuth[n] = registry.DockerRegistryAuth{
+			Type:     registry.DockerRegistryAuthType(v.Type),
+			Username: v.Username,
+			Password: v.Password,
+			Auth:     v.Auth,
+		}
+	}
+
+	dockerConfig, err := registry.GenDockerConfig(dockerRegistriesAuth, []string{et.Spec.Containers[0].Image})
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -1133,7 +1149,7 @@ func (e *Executor) tasksUpdater(ctx context.Context) error {
 		e.log.Warn().Err(err).Send()
 		return errors.WithStack(err)
 	}
-	e.log.Debug().Msgf("ets: %v", util.Dump(ets))
+	e.log.Debug().Msgf("ets: %s", util.Dump(ets))
 	for _, et := range ets {
 		e.taskUpdater(ctx, et)
 	}
@@ -1158,7 +1174,7 @@ func (e *Executor) tasksUpdater(ctx context.Context) error {
 }
 
 func (e *Executor) taskUpdater(ctx context.Context, et *types.ExecutorTask) {
-	e.log.Debug().Msgf("et: %v", util.Dump(et))
+	e.log.Debug().Msgf("et: %s", util.Dump(et))
 	if et.Spec.ExecutorID != e.id {
 		return
 	}
@@ -1250,7 +1266,7 @@ func (e *Executor) tasksDataCleanerLoop(ctx context.Context) {
 }
 
 func (e *Executor) tasksDataCleaner(ctx context.Context) error {
-	entries, err := ioutil.ReadDir(e.tasksDir())
+	entries, err := os.ReadDir(e.tasksDir())
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -1259,7 +1275,7 @@ func (e *Executor) tasksDataCleaner(ctx context.Context) error {
 		if !entry.IsDir() {
 			continue
 		}
-		etID := filepath.Base(entry.Name())
+		etID := entry.Name()
 
 		_, resp, err := e.runserviceClient.GetExecutorTask(ctx, e.id, etID)
 		if err != nil {
@@ -1296,6 +1312,12 @@ type runningTask struct {
 
 	et  *types.ExecutorTask
 	pod driver.Pod
+
+	// timedout is used to know when the task is timedout
+	timedout bool
+
+	// podStartTime is used to know when the pod is started
+	podStartTime *time.Time
 }
 
 func (r *runningTasks) get(rtID string) (*runningTask, bool) {
@@ -1346,7 +1368,7 @@ func (e *Executor) handleTasks(ctx context.Context, c <-chan *types.ExecutorTask
 }
 
 func (e *Executor) getExecutorID() (string, error) {
-	id, err := ioutil.ReadFile(e.executorIDPath())
+	id, err := os.ReadFile(e.executorIDPath())
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", errors.WithStack(err)
 	}
@@ -1441,13 +1463,13 @@ func NewExecutor(ctx context.Context, log zerolog.Logger, c *config.Executor) (*
 			return nil, errors.WithStack(err)
 		}
 		dockerAuthConfig :=
-			types.DockerRegistryAuth{
-				Type:     types.DockerRegistryAuthType(e.c.InitImage.Auth.Type),
+			registry.DockerRegistryAuth{
+				Type:     registry.DockerRegistryAuthType(e.c.InitImage.Auth.Type),
 				Username: e.c.InitImage.Auth.Username,
 				Password: e.c.InitImage.Auth.Password,
 				Auth:     e.c.InitImage.Auth.Auth,
 			}
-		initDockerConfig, err = registry.GenDockerConfig(map[string]types.DockerRegistryAuth{regName: dockerAuthConfig}, []string{e.c.InitImage.Image})
+		initDockerConfig, err = registry.GenDockerConfig(map[string]registry.DockerRegistryAuth{regName: dockerAuthConfig}, []string{e.c.InitImage.Image})
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
@@ -1496,6 +1518,7 @@ func (e *Executor) Run(ctx context.Context) error {
 	go e.podsCleanerLoop(ctx)
 	go e.tasksUpdaterLoop(ctx)
 	go e.tasksDataCleanerLoop(ctx)
+	go e.tasksTimeoutCleanerLoop(ctx)
 
 	go e.handleTasks(ctx, ch)
 
@@ -1524,4 +1547,35 @@ func (e *Executor) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (e *Executor) tasksTimeoutCleanerLoop(ctx context.Context) {
+	for {
+		e.log.Debug().Msgf("tasksTimeoutCleaner")
+
+		e.tasksTimeoutCleaner()
+
+		sleepCh := time.NewTimer(tasksTimeoutCleanerInterval).C
+		select {
+		case <-ctx.Done():
+			return
+		case <-sleepCh:
+		}
+	}
+}
+
+func (e *Executor) tasksTimeoutCleaner() {
+	for _, rtID := range e.runningTasks.ids() {
+		rt, ok := e.runningTasks.get(rtID)
+		if !ok {
+			continue
+		}
+
+		rt.Lock()
+		if rt.et.Spec.TaskTimeoutInterval != 0 && rt.podStartTime != nil && time.Since(*rt.podStartTime) > rt.et.Spec.TaskTimeoutInterval {
+			rt.timedout = true
+			rt.cancel()
+		}
+		rt.Unlock()
+	}
 }

@@ -67,7 +67,7 @@ type UserSource interface {
 
 type PasswordSource interface {
 	UserSource
-	LoginPassword(username, password, tokenName string) (string, error)
+	CreateAccessToken(tokenName string) (string, error)
 }
 
 type Oauth2Source interface {
@@ -82,11 +82,12 @@ type Oauth2Source interface {
 }
 
 type RepoInfo struct {
-	ID           string
-	Path         string
-	HTMLURL      string
-	SSHCloneURL  string
-	HTTPCloneURL string
+	ID            string
+	Path          string
+	HTMLURL       string
+	SSHCloneURL   string
+	HTTPCloneURL  string
+	DefaultBranch string
 }
 
 type UserInfo struct {

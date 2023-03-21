@@ -39,6 +39,7 @@ const (
 	changeGroupCompactorInterval = 1 * time.Minute
 	cacheCleanerInterval         = 1 * 24 * time.Hour
 	workspaceCleanerInterval     = 1 * 24 * time.Hour
+	logCleanerInterval           = 1 * 24 * time.Hour
 
 	defaultExecutorNotAliveInterval = 60 * time.Second
 
@@ -261,9 +262,6 @@ func (s *Runservice) submitRunTasks(ctx context.Context, r *types.Run, rc *types
 			return nil
 		}
 
-		executorTask = common.GenExecutorTask(r, rt, rc, executor)
-		s.log.Debug().Msgf("et: %s", util.Dump(executorTask))
-
 		// check again that the executorTask for this runTask id wasn't already scheduled
 		// if not existing, save and submit it
 		var shouldSend bool
@@ -276,6 +274,9 @@ func (s *Runservice) submitRunTasks(ctx context.Context, r *types.Run, rc *types
 			if curExecutorTask != nil {
 				return nil
 			}
+
+			executorTask = common.GenExecutorTask(tx, r, rt, rc, executor)
+			s.log.Debug().Msgf("et: %s", util.Dump(executorTask))
 
 			if err := s.d.InsertExecutorTask(tx, executorTask); err != nil {
 				return errors.WithStack(err)
@@ -549,11 +550,19 @@ func (s *Runservice) scheduleRun(ctx context.Context, runID string) error {
 		return errors.WithStack(err)
 	}
 
+	curRunRevision := r.Revision
+	curScheduledExecutorTasksRevisions := map[string]uint64{}
+	for _, et := range scheduledExecutorTasks {
+		curScheduledExecutorTasksRevisions[et.ID] = et.Revision
+	}
 	err = s.d.Do(ctx, func(tx *sql.Tx) error {
 		// if the run is set to stop, stop all active tasks
 		if r.Stop {
 			for _, et := range scheduledExecutorTasks {
 				et.Spec.Stop = true
+
+				et.TxID = tx.ID()
+				et.Revision = curScheduledExecutorTasksRevisions[et.ID]
 				if err := s.d.UpdateExecutorTask(tx, et); err != nil {
 					return errors.WithStack(err)
 				}
@@ -570,6 +579,9 @@ func (s *Runservice) scheduleRun(ctx context.Context, runID string) error {
 
 			shouldSubmitRunTasks = true
 		}
+
+		r.TxID = tx.ID()
+		r.Revision = curRunRevision
 
 		if err := s.d.UpdateRun(tx, r); err != nil {
 			return errors.WithStack(err)
@@ -795,6 +807,7 @@ func (s *Runservice) updateRunTaskStatus(et *types.ExecutorTask, r *types.Run) e
 		rt.Status = types.RunTaskStatusFailed
 	}
 
+	rt.Timedout = et.Status.Timedout
 	rt.SetupStep.Phase = et.Status.SetupStep.Phase
 	rt.SetupStep.StartTime = et.Status.SetupStep.StartTime
 	rt.SetupStep.EndTime = et.Status.SetupStep.EndTime
@@ -819,7 +832,7 @@ func (s *Runservice) executorTaskUpdateHandler(ctx context.Context, c <-chan str
 				if err := s.handleExecutorTaskUpdate(ctx, etID); err != nil {
 					// TODO(sgotti) improve logging to not return "run modified errors" since
 					// they are normal
-					s.log.Warn().Msgf("err: %+v", err)
+					s.log.Warn().Err(err).Send()
 				}
 			}()
 		}
@@ -1578,7 +1591,7 @@ func (s *Runservice) cacheCleaner(ctx context.Context, cacheExpireInterval time.
 		if object.LastModified.Add(cacheExpireInterval).Before(time.Now()) {
 			if err := s.ost.DeleteObject(object.Path); err != nil {
 				if !objectstorage.IsNotExist(err) {
-					s.log.Warn().Msgf("failed to delete cache object %q: %v", object.Path, err)
+					s.log.Warn().Err(err).Msgf("failed to delete cache object %q", object.Path)
 				}
 			}
 		}
@@ -1589,7 +1602,7 @@ func (s *Runservice) cacheCleaner(ctx context.Context, cacheExpireInterval time.
 
 func (s *Runservice) workspaceCleanerLoop(ctx context.Context, workspaceExpireInterval time.Duration) {
 	for {
-		if err := s.workspaceCleaner(ctx, workspaceExpireInterval); err != nil {
+		if err := s.objectsCleaner(ctx, store.OSTArchivesBaseDir(), common.WorkspaceCleanerLockKey, workspaceExpireInterval); err != nil {
 			s.log.Err(err).Send()
 		}
 
@@ -1602,25 +1615,42 @@ func (s *Runservice) workspaceCleanerLoop(ctx context.Context, workspaceExpireIn
 	}
 }
 
-func (s *Runservice) workspaceCleaner(ctx context.Context, workspaceExpireInterval time.Duration) error {
-	s.log.Debug().Msgf("workspaceCleaner")
+func (s *Runservice) logCleanerLoop(ctx context.Context, logExpireInterval time.Duration) {
+	s.log.Debug().Msgf("logCleanerLoop")
+
+	for {
+		if err := s.objectsCleaner(ctx, store.OSTLogsBaseDir(), common.LogCleanerLockKey, logExpireInterval); err != nil {
+			s.log.Warn().Err(err).Msgf("objectsCleaner error")
+		}
+
+		sleepCh := time.NewTimer(logCleanerInterval).C
+		select {
+		case <-ctx.Done():
+			return
+		case <-sleepCh:
+		}
+	}
+}
+
+func (s *Runservice) objectsCleaner(ctx context.Context, prefix string, etcdLockKey string, objectExpireInterval time.Duration) error {
+	s.log.Debug().Msgf("objectsCleaner")
 
 	l := s.lf.NewLock(common.WorkspaceCleanerLockKey)
 	if err := l.Lock(ctx); err != nil {
-		return errors.Wrap(err, "failed to acquire workspace cleaner lock")
+		return errors.Wrap(err, "failed to acquire object cleaner lock")
 	}
 	defer func() { _ = l.Unlock() }()
 
 	doneCh := make(chan struct{})
 	defer close(doneCh)
-	for object := range s.ost.List(store.OSTArchivesBaseDir()+"/", "", true, doneCh) {
+	for object := range s.ost.List(prefix+"/", "", true, doneCh) {
 		if object.Err != nil {
 			return object.Err
 		}
-		if object.LastModified.Add(workspaceExpireInterval).Before(time.Now()) {
+		if object.LastModified.Add(objectExpireInterval).Before(time.Now()) {
 			if err := s.ost.DeleteObject(object.Path); err != nil {
 				if !objectstorage.IsNotExist(err) {
-					s.log.Warn().Msgf("failed to delete workspace object %q: %v", object.Path, err)
+					s.log.Warn().Err(err).Msgf("failed to delete object %q", object.Path)
 				}
 			}
 		}

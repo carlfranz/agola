@@ -3,7 +3,7 @@ package util
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"agola.io/agola/internal/errors"
@@ -37,9 +37,9 @@ func ErrorResponseFromError(err error) *ErrorResponse {
 		return nil
 	}
 
-	var derr *APIError
-	if errors.As(err, &derr) {
-		return &ErrorResponse{Code: string(derr.Code), Message: derr.Message}
+	var aerr *APIError
+	if errors.As(err, &aerr) {
+		return &ErrorResponse{Code: string(aerr.Code), Message: aerr.Message}
 	}
 
 	// on generic error return an error response without any code
@@ -60,9 +60,9 @@ func HTTPError(w http.ResponseWriter, err error) bool {
 
 	code := http.StatusInternalServerError
 
-	var derr *APIError
-	if errors.As(err, &derr) {
-		switch derr.Kind {
+	var aerr *APIError
+	if errors.As(err, &aerr) {
+		switch aerr.Kind {
 		case ErrBadRequest:
 			code = http.StatusBadRequest
 		case ErrNotExist:
@@ -94,13 +94,13 @@ func ErrFromRemote(resp *http.Response) error {
 
 	defer resp.Body.Close()
 
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
 	// Re-populate error response body so it can be parsed by the caller if needed
-	resp.Body = ioutil.NopCloser(bytes.NewBuffer(data))
+	resp.Body = io.NopCloser(bytes.NewBuffer(data))
 
 	if err := json.Unmarshal(data, &response); err != nil {
 		return errors.Errorf("unknown api error (status: %d)", resp.StatusCode)

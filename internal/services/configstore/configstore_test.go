@@ -18,8 +18,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"path"
 	"path/filepath"
 	"sync"
@@ -33,22 +33,24 @@ import (
 	"agola.io/agola/internal/testutil"
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/configstore/types"
+	stypes "agola.io/agola/services/types"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/rs/zerolog"
 )
 
 func setupConfigstore(ctx context.Context, t *testing.T, log zerolog.Logger, dir string) *Configstore {
-	listenAddress, port, err := testutil.GetFreePort(true, false)
+	port, err := testutil.GetFreePort("localhost", true, false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 
-	ostDir, err := ioutil.TempDir(dir, "ost")
+	ostDir, err := os.MkdirTemp(dir, "ost")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	csDir, err := ioutil.TempDir(dir, "cs")
+	csDir, err := os.MkdirTemp(dir, "cs")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -66,7 +68,7 @@ func setupConfigstore(ctx context.Context, t *testing.T, log zerolog.Logger, dir
 	}
 	csConfig := baseConfig
 	csConfig.DataDir = csDir
-	csConfig.Web.ListenAddress = net.JoinHostPort(listenAddress, port)
+	csConfig.Web.ListenAddress = net.JoinHostPort("localhost", port)
 
 	cs, err := NewConfigstore(ctx, log, &csConfig)
 	if err != nil {
@@ -74,6 +76,42 @@ func setupConfigstore(ctx context.Context, t *testing.T, log zerolog.Logger, dir
 	}
 
 	return cs
+}
+
+func setupUsers(t *testing.T, ctx context.Context, cs *Configstore) {
+	i := 1
+	for i < 5 {
+		req := &action.CreateUserRequest{
+			UserName: "UserTest" + fmt.Sprint(i),
+		}
+		_, err := cs.ah.CreateUser(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+
+		i++
+	}
+}
+
+func setupOrgs(t *testing.T, ctx context.Context, cs *Configstore, userMemberID string) {
+	i := 1
+	for i < 5 {
+		req := &action.CreateOrgRequest{
+			Name:       "OrgTest" + fmt.Sprint(i),
+			Visibility: "public",
+		}
+		org, err := cs.ah.CreateOrg(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+
+		_, err = cs.ah.AddOrgMember(ctx, org.ID, userMemberID, types.MemberRoleOwner)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+
+		i++
+	}
 }
 
 func getRemoteSources(ctx context.Context, cs *Configstore) ([]*types.RemoteSource, error) {
@@ -152,15 +190,13 @@ func getVariables(ctx context.Context, cs *Configstore) ([]*types.Variable, erro
 	return variables, errors.WithStack(err)
 }
 
-func compareObjects(u1, u2 interface{}) bool {
-	if diff := cmp.Diff(u1, u2); diff != "" {
-		return false
-	}
-
-	return true
+func cmpDiffObject(x, y interface{}) string {
+	return cmp.Diff(x, y, cmpopts.IgnoreFields(stypes.ObjectMeta{}, "TxID"))
 }
 
 func TestExportImport(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -356,30 +392,32 @@ func TestExportImport(t *testing.T) {
 		t.Fatalf("unexpected err: %v", err)
 	}
 
-	if !compareObjects(remoteSources, newRemoteSources) {
-		t.Fatalf("remoteSources are different between before and after import")
+	if diff := cmpDiffObject(remoteSources, newRemoteSources); diff != "" {
+		t.Fatalf("remoteSources mismatch (-want +got):\n%s", diff)
 	}
-	if !compareObjects(users, newUsers) {
-		t.Fatalf("users are different between before and after import")
+	if diff := cmpDiffObject(users, newUsers); diff != "" {
+		t.Fatalf("users mismatch (-want +got):\n%s", diff)
 	}
-	if !compareObjects(orgs, newOrgs) {
-		t.Fatalf("orgs are different between before and after import")
+	if diff := cmpDiffObject(orgs, newOrgs); diff != "" {
+		t.Fatalf("orgs mismatch (-want +got):\n%s", diff)
 	}
-	if !compareObjects(projectGroups, newProjectGroups) {
-		t.Fatalf("projectGroups are different between before and after import")
+	if diff := cmpDiffObject(projectGroups, newProjectGroups); diff != "" {
+		t.Fatalf("projectGroups mismatch (-want +got):\n%s", diff)
 	}
-	if !compareObjects(projects, newProjects) {
-		t.Fatalf("projects are different between before and after import")
+	if diff := cmpDiffObject(projects, newProjects); diff != "" {
+		t.Fatalf("projects mismatch (-want +got):\n%s", diff)
 	}
-	if !compareObjects(secrets, newSecrets) {
-		t.Fatalf("secrets are different between before and after import")
+	if diff := cmpDiffObject(secrets, newSecrets); diff != "" {
+		t.Fatalf("secrets mismatch (-want +got):\n%s", diff)
 	}
-	if !compareObjects(variables, newVariables) {
-		t.Fatalf("variables are different between before and after import")
+	if diff := cmpDiffObject(variables, newVariables); diff != "" {
+		t.Fatalf("variables mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestUser(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -399,12 +437,12 @@ func TestUser(t *testing.T) {
 	})
 
 	t.Run("create duplicated user", func(t *testing.T) {
-		expectedErr := fmt.Sprintf("user with name %q already exists", "user01")
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("user with name %q already exists", "user01"))
 		_, err := cs.ah.CreateUser(ctx, &action.CreateUserRequest{UserName: "user01"})
 		if err == nil {
 			t.Fatalf("expected error %v, got nil err", expectedErr)
 		}
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -433,9 +471,36 @@ func TestUser(t *testing.T) {
 			t.Fatalf("expected %d users, got %d", len(prevUsers)+1, len(users))
 		}
 	})
+
+	t.Run("delete user", func(t *testing.T) {
+		_, err := cs.ah.CreateUser(ctx, &action.CreateUserRequest{UserName: "user03"})
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+
+		err = cs.ah.DeleteUser(ctx, "user03")
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+
+		var user *types.User
+		err = cs.d.Do(ctx, func(tx *sql.Tx) error {
+			var err error
+			user, err = cs.d.GetUser(tx, "user03")
+			return errors.WithStack(err)
+		})
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if user != nil {
+			t.Fatalf("expected user nil, got: %v", user)
+		}
+	})
 }
 
 func TestProjectGroupsAndProjectsCreate(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -495,49 +560,49 @@ func TestProjectGroupsAndProjectsCreate(t *testing.T) {
 
 	t.Run("create duplicated project in user root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := fmt.Sprintf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName)))
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
 	t.Run("create duplicated project in org root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := fmt.Sprintf("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, projectName))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, projectName)))
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
 
 	t.Run("create duplicated project in user non root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := fmt.Sprintf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, "projectgroup01", projectName))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, "projectgroup01", projectName)))
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
 	t.Run("create duplicated project in org non root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := fmt.Sprintf("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, "projectgroup01", projectName))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, "projectgroup01", projectName)))
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
 
 	t.Run("create project in unexistent project group", func(t *testing.T) {
-		expectedErr := `project group with id "unexistentid" doesn't exist`
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf(`project group with id "unexistentid" doesn't exist`))
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: "unexistentid"}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
 	t.Run("create project without parent id specified", func(t *testing.T) {
-		expectedErr := "project parent id required"
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project parent id required"))
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -570,6 +635,8 @@ func TestProjectGroupsAndProjectsCreate(t *testing.T) {
 }
 
 func TestProjectUpdate(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -612,10 +679,10 @@ func TestProjectUpdate(t *testing.T) {
 	})
 	t.Run("move project to project group having project with same name", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := fmt.Sprintf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName)))
 		p02.Parent.ID = path.Join("user", user.Name)
 		_, err := cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "projectgroup01", projectName), p02)
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -631,6 +698,8 @@ func TestProjectUpdate(t *testing.T) {
 }
 
 func TestProjectGroupUpdate(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -682,10 +751,10 @@ func TestProjectGroupUpdate(t *testing.T) {
 	})
 	t.Run("move project to project group having project with same name", func(t *testing.T) {
 		projectGroupName := "pg01"
-		expectedErr := fmt.Sprintf("project group with name %q, path %q already exists", projectGroupName, path.Join("user", user.Name, projectGroupName))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project group with name %q, path %q already exists", projectGroupName, path.Join("user", user.Name, projectGroupName)))
 		pg05req.Parent.ID = path.Join("user", user.Name)
 		_, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, "pg02", projectGroupName), pg05req)
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -703,19 +772,19 @@ func TestProjectGroupUpdate(t *testing.T) {
 	})
 	t.Run("move project group inside itself", func(t *testing.T) {
 		projectGroupName := "pg02"
-		expectedErr := "cannot move project group inside itself or child project group"
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot move project group inside itself or child project group"))
 		pg02req.Parent.ID = path.Join("user", user.Name, "pg02")
 		_, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, projectGroupName), pg02req)
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
 	t.Run("move project group to child project group", func(t *testing.T) {
 		projectGroupName := "pg01"
-		expectedErr := "cannot move project group inside itself or child project group"
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot move project group inside itself or child project group"))
 		pg01req.Parent.ID = path.Join("user", user.Name, "pg01", "pg01")
 		_, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, projectGroupName), pg01req)
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -728,9 +797,9 @@ func TestProjectGroupUpdate(t *testing.T) {
 		rootPG.Parent.Kind = types.ObjectKindProjectGroup
 		rootPG.Name = "rootpg"
 
-		expectedErr := "changing project group parent kind isn't supported"
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("changing project group parent kind isn't supported"))
 		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPG.Name, Parent: rootPG.Parent, Visibility: rootPG.Visibility})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -742,9 +811,9 @@ func TestProjectGroupUpdate(t *testing.T) {
 		}
 		rootPG.Parent.ID = path.Join("user", user.Name, "pg01")
 
-		expectedErr := "cannot change root project group parent kind or id"
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot change root project group parent kind or id"))
 		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPG.Name, Parent: rootPG.Parent, Visibility: rootPG.Visibility})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -756,9 +825,9 @@ func TestProjectGroupUpdate(t *testing.T) {
 		}
 		rootPG.Name = "rootpgnewname"
 
-		expectedErr := "project group name for root project group must be empty"
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project group name for root project group must be empty"))
 		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPG.Name, Parent: rootPG.Parent, Visibility: rootPG.Visibility})
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -785,6 +854,8 @@ func TestProjectGroupUpdate(t *testing.T) {
 }
 
 func TestProjectGroupDelete(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -813,9 +884,9 @@ func TestProjectGroupDelete(t *testing.T) {
 	}
 
 	t.Run("delete root project group", func(t *testing.T) {
-		expectedErr := "cannot delete root project group"
+		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot delete root project group"))
 		err := cs.ah.DeleteProjectGroup(ctx, path.Join("org", org.Name))
-		if err.Error() != expectedErr {
+		if err.Error() != expectedErr.Error() {
 			t.Fatalf("expected err %v, got err: %v", expectedErr, err)
 		}
 	})
@@ -829,6 +900,8 @@ func TestProjectGroupDelete(t *testing.T) {
 }
 
 func TestProjectGroupDeleteDontSeeOldChildObjects(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -904,8 +977,8 @@ func TestProjectGroupDeleteDontSeeOldChildObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if diff := cmp.Diff(projects, []*types.Project{project}); diff != "" {
-		t.Error(diff)
+	if diff := cmpDiffObject(projects, []*types.Project{project}); diff != "" {
+		t.Fatalf("mismatch (-want +got):\n%s", diff)
 	}
 
 	// Get by projectgroup path
@@ -913,44 +986,46 @@ func TestProjectGroupDeleteDontSeeOldChildObjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if diff := cmp.Diff(projects, []*types.Project{project}); diff != "" {
-		t.Error(diff)
+	if diff := cmpDiffObject(projects, []*types.Project{project}); diff != "" {
+		t.Fatalf("mismatch (-want +got):\n%s", diff)
 	}
 
 	secrets, err := cs.ah.GetSecrets(ctx, types.ObjectKindProject, project.ID, false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if diff := cmp.Diff(secrets, []*types.Secret{secret}); diff != "" {
-		t.Error(diff)
+	if diff := cmpDiffObject(secrets, []*types.Secret{secret}); diff != "" {
+		t.Fatalf("mismatch (-want +got):\n%s", diff)
 	}
 
 	secrets, err = cs.ah.GetSecrets(ctx, types.ObjectKindProject, path.Join("org", org.Name, pg01.Name, spg01.Name, project.Name), false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if diff := cmp.Diff(secrets, []*types.Secret{secret}); diff != "" {
-		t.Error(diff)
+	if diff := cmpDiffObject(secrets, []*types.Secret{secret}); diff != "" {
+		t.Fatalf("mismatch (-want +got):\n%s", diff)
 	}
 
 	variables, err := cs.ah.GetVariables(ctx, types.ObjectKindProject, project.ID, false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if diff := cmp.Diff(variables, []*types.Variable{variable}); diff != "" {
-		t.Error(diff)
+	if diff := cmpDiffObject(variables, []*types.Variable{variable}); diff != "" {
+		t.Fatalf("mismatch (-want +got):\n%s", diff)
 	}
 
 	variables, err = cs.ah.GetVariables(ctx, types.ObjectKindProject, path.Join("org", org.Name, pg01.Name, spg01.Name, project.Name), false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if diff := cmp.Diff(variables, []*types.Variable{variable}); diff != "" {
-		t.Error(diff)
+	if diff := cmpDiffObject(variables, []*types.Variable{variable}); diff != "" {
+		t.Fatalf("mismatch (-want +got):\n%s", diff)
 	}
 }
 
 func TestOrgMembers(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	ctx := context.Background()
 	log := testutil.NewLogger(t)
@@ -980,8 +1055,8 @@ func TestOrgMembers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if diff := cmp.Diff(res, expectedResponse); diff != "" {
-			t.Error(diff)
+		if diff := cmpDiffObject(res, expectedResponse); diff != "" {
+			t.Fatalf("mismatch (-want +got):\n%s", diff)
 		}
 	})
 
@@ -1018,14 +1093,15 @@ func TestOrgMembers(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if diff := cmp.Diff(res, expectedResponse); diff != "" {
-			t.Error(diff)
+		if diff := cmpDiffObject(res, expectedResponse); diff != "" {
+			t.Fatalf("mismatch (-want +got):\n%s", diff)
 		}
 	})
 }
 
 func TestRemoteSource(t *testing.T) {
-	dir := t.TempDir()
+	t.Parallel()
+
 	log := testutil.NewLogger(t)
 
 	tests := []struct {
@@ -1151,10 +1227,306 @@ func TestRemoteSource(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir, err := ioutil.TempDir(dir, "agola")
+			dir := t.TempDir()
+
+			ctx := context.Background()
+
+			cs := setupConfigstore(ctx, t, log, dir)
+
+			t.Logf("starting cs")
+			go func() { _ = cs.Run(ctx) }()
+
+			tt.f(ctx, t, cs)
+		})
+	}
+}
+
+func TestDeleteOrg(t *testing.T) {
+	t.Parallel()
+
+	log := testutil.NewLogger(t)
+
+	tests := []struct {
+		name string
+		f    func(ctx context.Context, t *testing.T, cs *Configstore)
+	}{
+		{
+			name: "test delete org by id",
+			f: func(ctx context.Context, t *testing.T, cs *Configstore) {
+				orgs, err := getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				if err := cs.ah.DeleteOrg(ctx, orgs[0].ID); err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				orgs, err = getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				if len(orgs) != 0 {
+					t.Fatalf("expected 0 orgs, got %d orgs", len(orgs))
+				}
+			},
+		},
+		{
+			name: "test delete org by name",
+			f: func(ctx context.Context, t *testing.T, cs *Configstore) {
+				orgs, err := getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				if err := cs.ah.DeleteOrg(ctx, orgs[0].Name); err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				orgs, err = getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				if len(orgs) != 0 {
+					t.Fatalf("expected 0 orgs, got %d orgs", len(orgs))
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			ctx := context.Background()
+
+			cs := setupConfigstore(ctx, t, log, dir)
+
+			t.Logf("starting cs")
+
+			_, err := cs.ah.CreateOrg(ctx, &action.CreateOrgRequest{Name: "org01", Visibility: types.VisibilityPublic})
 			if err != nil {
 				t.Fatalf("unexpected err: %v", err)
 			}
+
+			go func() { _ = cs.Run(ctx) }()
+
+			tt.f(ctx, t, cs)
+		})
+	}
+}
+
+func TestOrgInvitation(t *testing.T) {
+	t.Parallel()
+
+	log := testutil.NewLogger(t)
+
+	tests := []struct {
+		name string
+		f    func(ctx context.Context, t *testing.T, cs *Configstore)
+	}{
+		{
+			name: "test create org invitation",
+			f: func(ctx context.Context, t *testing.T, cs *Configstore) {
+				setupUsers(t, ctx, cs)
+				users, err := getUsers(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				userOwner := users[0]
+				userInvitation := users[1]
+
+				setupOrgs(t, ctx, cs, userOwner.ID)
+				orgs, err := getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				org := orgs[0]
+
+				rs := &action.CreateOrgInvitationRequest{
+					UserRef:         userInvitation.ID,
+					OrganizationRef: org.ID,
+					Role:            types.MemberRoleMember,
+				}
+				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				fmt.Println("err:", err)
+			},
+		},
+		{
+			name: "test user org invitation creation with already existing invitation",
+			f: func(ctx context.Context, t *testing.T, cs *Configstore) {
+				setupUsers(t, ctx, cs)
+				users, err := getUsers(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+
+				userOwner := users[0]
+				userInvitation := users[1]
+
+				setupOrgs(t, ctx, cs, userOwner.ID)
+				orgs, err := getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				if len(users) == 0 {
+					t.Fatalf("err: users empty")
+				}
+				org := orgs[0]
+
+				rs := &action.CreateOrgInvitationRequest{
+					UserRef:         userInvitation.ID,
+					OrganizationRef: org.ID,
+					Role:            types.MemberRoleMember,
+				}
+				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				expectedError := util.NewAPIError(util.ErrBadRequest, errors.Errorf("invitation already exists"))
+				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
+				if err.Error() != expectedError.Error() {
+					t.Fatalf("expected err: %v, got err: %v", expectedError.Error(), err.Error())
+				}
+			},
+		},
+		{
+			name: "test org deletion with existing org invitations",
+			f: func(ctx context.Context, t *testing.T, cs *Configstore) {
+				setupUsers(t, ctx, cs)
+				users, err := getUsers(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				userOwner := users[0]
+				userInvitation := users[1]
+
+				setupOrgs(t, ctx, cs, userOwner.ID)
+				orgs, err := getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				org := orgs[0]
+
+				rs := &action.CreateOrgInvitationRequest{
+					UserRef:         userInvitation.ID,
+					OrganizationRef: org.ID,
+					Role:            types.MemberRoleMember,
+				}
+				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				err = cs.ah.DeleteOrg(ctx, org.ID)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				orgInvitations, err := cs.ah.GetUserOrgInvitations(ctx, userInvitation.ID)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				if len(orgInvitations) != 0 {
+					t.Fatalf("expected 0 orgInvitations, got %d orgInvitations", len(orgInvitations))
+				}
+
+			},
+		},
+		{
+			name: "test user deletion with existing org invitations",
+			f: func(ctx context.Context, t *testing.T, cs *Configstore) {
+				setupUsers(t, ctx, cs)
+				users, err := getUsers(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				userOwner := users[0]
+				userInvitation := users[1]
+
+				setupOrgs(t, ctx, cs, userOwner.ID)
+				orgs, err := getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				org := orgs[0]
+
+				rs := &action.CreateOrgInvitationRequest{
+					UserRef:         userInvitation.ID,
+					OrganizationRef: org.ID,
+					Role:            types.MemberRoleMember,
+				}
+				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				err = cs.ah.DeleteUser(ctx, userInvitation.ID)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				orgInvitations, err := cs.ah.GetOrgInvitations(ctx, org.ID)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				if len(orgInvitations) != 0 {
+					t.Fatalf("expected 0 orgInvitations, got %d orgInvitations", len(orgInvitations))
+				}
+			},
+		},
+		{
+			name: "test add org member with an existing org invitation",
+			f: func(ctx context.Context, t *testing.T, cs *Configstore) {
+				setupUsers(t, ctx, cs)
+				users, err := getUsers(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				userOwner := users[0]
+				userInvitation := users[1]
+
+				setupOrgs(t, ctx, cs, userOwner.ID)
+				orgs, err := getOrgs(ctx, cs)
+				if err != nil {
+					t.Fatalf("err: %v", err)
+				}
+				org := orgs[0]
+
+				rs := &action.CreateOrgInvitationRequest{
+					UserRef:         userInvitation.ID,
+					OrganizationRef: org.ID,
+					Role:            types.MemberRoleMember,
+				}
+				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				_, err = cs.ah.AddOrgMember(ctx, org.ID, userInvitation.ID, types.MemberRoleMember)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				orgInvitations, err := cs.ah.GetOrgInvitations(ctx, org.ID)
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				if len(orgInvitations) != 0 {
+					t.Fatalf("expected 0 orgInvitations, got %d orgInvitations", len(orgInvitations))
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+
 			ctx := context.Background()
 
 			cs := setupConfigstore(ctx, t, log, dir)

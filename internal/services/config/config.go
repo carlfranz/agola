@@ -15,7 +15,7 @@
 package config
 
 import (
-	"io/ioutil"
+	"os"
 	"time"
 
 	"agola.io/agola/internal/errors"
@@ -26,7 +26,8 @@ import (
 )
 
 const (
-	maxIDLength = 20
+	maxIDLength                         = 20
+	defaultOrganizationMemberAddingMode = OrganizationMemberAddingModeDirect
 )
 
 type Config struct {
@@ -61,9 +62,15 @@ type Gateway struct {
 	Web           Web           `yaml:"web"`
 	ObjectStorage ObjectStorage `yaml:"objectStorage"`
 
-	TokenSigning TokenSigning `yaml:"tokenSigning"`
+	TokenSigning  TokenSigning  `yaml:"tokenSigning"`
+	CookieSigning CookieSigning `yaml:"cookieSigning"`
+
+	// when true will not set __Host/__Secure and Secure cookies. Should be set only for local development over http
+	UnsecureCookies bool `yaml:"unsecureCookies"`
 
 	AdminToken string `yaml:"adminToken"`
+
+	OrganizationMemberAddingMode OrganizationMemberAddingMode `yaml:"organizationMemberAddingMode"`
 }
 
 type Scheduler struct {
@@ -98,6 +105,7 @@ type Runservice struct {
 
 	RunCacheExpireInterval     time.Duration `yaml:"runCacheExpireInterval"`
 	RunWorkspaceExpireInterval time.Duration `yaml:"runWorkspaceExpireInterval"`
+	RunLogExpireInterval       time.Duration `yaml:"runLogExpireInterval"`
 }
 
 type Executor struct {
@@ -245,16 +253,41 @@ type TokenSigning struct {
 	PublicKeyPath string `yaml:"publicKeyPath"`
 }
 
+type CookieSigning struct {
+	Duration time.Duration `yaml:"duration"`
+	Key      string        `yaml:"key"`
+}
+
+type OrganizationMemberAddingMode string
+
+const (
+	OrganizationMemberAddingModeDirect     OrganizationMemberAddingMode = "direct"
+	OrganizationMemberAddingModeInvitation OrganizationMemberAddingMode = "invitation"
+)
+
+func (vt OrganizationMemberAddingMode) IsValid() bool {
+	switch vt {
+	case OrganizationMemberAddingModeDirect, OrganizationMemberAddingModeInvitation:
+		return true
+	}
+	return false
+}
+
 var defaultConfig = Config{
 	ID: "agola",
 	Gateway: Gateway{
 		TokenSigning: TokenSigning{
 			Duration: 12 * time.Hour,
 		},
+		CookieSigning: CookieSigning{
+			Duration: 12 * time.Hour,
+		},
+		OrganizationMemberAddingMode: defaultOrganizationMemberAddingMode,
 	},
 	Runservice: Runservice{
 		RunCacheExpireInterval:     7 * 24 * time.Hour,
 		RunWorkspaceExpireInterval: 7 * 24 * time.Hour,
+		RunLogExpireInterval:       30 * 24 * time.Hour,
 	},
 	Executor: Executor{
 		InitImage: InitImage{
@@ -269,7 +302,7 @@ var defaultConfig = Config{
 }
 
 func Parse(configFile string, componentsNames []string) (*Config, error) {
-	configData, err := ioutil.ReadFile(configFile)
+	configData, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -280,6 +313,14 @@ func Parse(configFile string, componentsNames []string) (*Config, error) {
 	}
 
 	return c, Validate(c, componentsNames)
+}
+
+func validateCookieSigning(s *CookieSigning) error {
+	if s.Key == "" {
+		return errors.Errorf("empty cookie signing key")
+	}
+
+	return nil
 }
 
 func validateDB(db *DB) error {
@@ -348,8 +389,14 @@ func Validate(c *Config, componentsNames []string) error {
 		if c.Gateway.RunserviceURL == "" {
 			return errors.Errorf("gateway runserviceURL is empty")
 		}
+		if err := validateCookieSigning(&c.Gateway.CookieSigning); err != nil {
+			return errors.Wrap(err, "cookie signing configuration error")
+		}
 		if err := validateWeb(&c.Gateway.Web); err != nil {
 			return errors.Wrapf(err, "gateway web configuration error")
+		}
+		if !c.Gateway.OrganizationMemberAddingMode.IsValid() {
+			return errors.Errorf("gateway organizationMemberAddingMode is not valid")
 		}
 	}
 

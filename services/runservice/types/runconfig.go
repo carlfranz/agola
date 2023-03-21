@@ -2,8 +2,10 @@ package types
 
 import (
 	"encoding/json"
+	"time"
 
 	"agola.io/agola/internal/errors"
+	"agola.io/agola/internal/sql"
 	stypes "agola.io/agola/services/types"
 	"agola.io/agola/util"
 
@@ -80,6 +82,7 @@ type RunConfigTask struct {
 	NeedsApproval        bool                            `json:"needs_approval,omitempty"`
 	Skip                 bool                            `json:"skip,omitempty"`
 	DockerRegistriesAuth map[string]DockerRegistryAuth   `json:"docker_registries_auth"`
+	TaskTimeoutInterval  time.Duration                   `json:"task_timeout_interval"`
 }
 
 func (rct *RunConfigTask) DeepCopy() *RunConfigTask {
@@ -256,14 +259,15 @@ func (et *Steps) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func NewRunConfig() *RunConfig {
+func NewRunConfig(tx *sql.Tx) *RunConfig {
 	return &RunConfig{
 		TypeMeta: stypes.TypeMeta{
 			Kind:    RunConfigKind,
 			Version: RunConfigVersion,
 		},
 		ObjectMeta: stypes.ObjectMeta{
-			ID: uuid.Must(uuid.NewV4()).String(),
+			ID:   uuid.Must(uuid.NewV4()).String(),
+			TxID: tx.ID(),
 		},
 	}
 }

@@ -518,6 +518,20 @@ func (c *Client) DeleteRemoteSource(ctx context.Context, rsRef string) (*http.Re
 	return c.getResponse(ctx, "DELETE", fmt.Sprintf("/remotesources/%s", rsRef), nil, jsonContent, nil)
 }
 
+func (c *Client) GetLinkedAccountByRemoteUserAndSource(ctx context.Context, remoteUserID, remoteSourceID string) (*cstypes.LinkedAccount, *http.Response, error) {
+	q := url.Values{}
+	q.Add("query_type", "byremoteuser")
+	q.Add("remoteuserid", remoteUserID)
+	q.Add("remotesourceid", remoteSourceID)
+
+	linkedAccounts := []*cstypes.LinkedAccount{}
+	resp, err := c.getParsedResponse(ctx, "GET", "/linkedaccounts", q, jsonContent, nil, &linkedAccounts)
+	if err != nil {
+		return nil, resp, errors.WithStack(err)
+	}
+	return linkedAccounts[0], resp, errors.WithStack(err)
+}
+
 func (c *Client) CreateOrg(ctx context.Context, req *csapitypes.CreateOrgRequest) (*cstypes.Organization, *http.Response, error) {
 	reqj, err := json.Marshal(req)
 	if err != nil {
@@ -531,6 +545,17 @@ func (c *Client) CreateOrg(ctx context.Context, req *csapitypes.CreateOrgRequest
 
 func (c *Client) DeleteOrg(ctx context.Context, orgRef string) (*http.Response, error) {
 	return c.getResponse(ctx, "DELETE", fmt.Sprintf("/orgs/%s", orgRef), nil, jsonContent, nil)
+}
+
+func (c *Client) UpdateOrg(ctx context.Context, orgRef string, req *csapitypes.UpdateOrgRequest) (*cstypes.Organization, *http.Response, error) {
+	reqj, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, errors.WithStack(err)
+	}
+
+	org := new(cstypes.Organization)
+	resp, err := c.getParsedResponse(ctx, "PUT", fmt.Sprintf("/orgs/%s", orgRef), nil, jsonContent, bytes.NewReader(reqj), org)
+	return org, resp, errors.WithStack(err)
 }
 
 func (c *Client) AddOrgMember(ctx context.Context, orgRef, userRef string, role cstypes.MemberRole) (*cstypes.OrganizationMember, *http.Response, error) {
@@ -578,4 +603,79 @@ func (c *Client) GetOrgMembers(ctx context.Context, orgRef string) ([]*csapitype
 	orgMembers := []*csapitypes.OrgMemberResponse{}
 	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/orgs/%s/members", orgRef), nil, jsonContent, nil, &orgMembers)
 	return orgMembers, resp, errors.WithStack(err)
+}
+
+func (c *Client) GetUserOrgInvitations(ctx context.Context, userRef string, limit int) ([]*cstypes.OrgInvitation, *http.Response, error) {
+	q := url.Values{}
+	if limit > 0 {
+		q.Add("limit", strconv.Itoa(limit))
+	}
+
+	orgInvitations := []*cstypes.OrgInvitation{}
+	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/users/%s/org_invitations", userRef), q, jsonContent, nil, &orgInvitations)
+	return orgInvitations, resp, err
+}
+
+func (c *Client) GetOrgInvitations(ctx context.Context, orgRef string, limit int) ([]*cstypes.OrgInvitation, *http.Response, error) {
+	q := url.Values{}
+	if limit > 0 {
+		q.Add("limit", strconv.Itoa(limit))
+	}
+
+	orgInvitations := []*cstypes.OrgInvitation{}
+	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/orgs/%s/invitations", orgRef), q, jsonContent, nil, &orgInvitations)
+	return orgInvitations, resp, err
+}
+
+func (c *Client) CreateOrgInvitation(ctx context.Context, orgRef string, req *csapitypes.CreateOrgInvitationRequest) (*cstypes.OrgInvitation, *http.Response, error) {
+	oj, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	orgInvitation := new(cstypes.OrgInvitation)
+	resp, err := c.getParsedResponse(ctx, "POST", fmt.Sprintf("/orgs/%s/invitations", orgRef), nil, jsonContent, bytes.NewReader(oj), orgInvitation)
+	return orgInvitation, resp, err
+}
+
+func (c *Client) DeleteOrgInvitation(ctx context.Context, orgRef string, userRef string) (*http.Response, error) {
+	return c.getResponse(ctx, "DELETE", fmt.Sprintf("/orgs/%s/invitations/%s", orgRef, userRef), nil, jsonContent, nil)
+}
+
+func (c *Client) GetOrgInvitation(ctx context.Context, orgRef string, userRef string) (*cstypes.OrgInvitation, *http.Response, error) {
+	orgInvitation := new(cstypes.OrgInvitation)
+	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/orgs/%s/invitations/%s", orgRef, userRef), nil, jsonContent, nil, orgInvitation)
+	return orgInvitation, resp, errors.WithStack(err)
+}
+
+func (c *Client) UserOrgInvitationAction(ctx context.Context, userRef string, orgRef string, req *csapitypes.OrgInvitationActionRequest) (*http.Response, error) {
+	reqj, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	resp, err := c.getResponse(ctx, "PUT", fmt.Sprintf("/orgs/%s/invitations/%s/actions", orgRef, userRef), nil, jsonContent, bytes.NewReader(reqj))
+	return resp, errors.WithStack(err)
+}
+
+func (c *Client) GetMaintenanceStatus(ctx context.Context) (*csapitypes.MaintenanceStatusResponse, *http.Response, error) {
+	maintenanceStatus := new(csapitypes.MaintenanceStatusResponse)
+	resp, err := c.getParsedResponse(ctx, "GET", "/maintenance", nil, jsonContent, nil, maintenanceStatus)
+	return maintenanceStatus, resp, errors.WithStack(err)
+}
+
+func (c *Client) EnableMaintenance(ctx context.Context) (*http.Response, error) {
+	return c.getResponse(ctx, "PUT", "/maintenance", nil, jsonContent, nil)
+}
+
+func (c *Client) DisableMaintenance(ctx context.Context) (*http.Response, error) {
+	return c.getResponse(ctx, "DELETE", "/maintenance", nil, jsonContent, nil)
+}
+
+func (c *Client) Export(ctx context.Context) (*http.Response, error) {
+	return c.getResponse(ctx, "GET", "/export", nil, jsonContent, nil)
+}
+
+func (c *Client) Import(ctx context.Context, r io.Reader) (*http.Response, error) {
+	return c.getResponse(ctx, "POST", "/import", nil, jsonContent, r)
 }

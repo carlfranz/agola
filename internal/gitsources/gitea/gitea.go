@@ -17,8 +17,6 @@ package gitea
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -35,13 +33,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const (
-	// TODO(sgotti) The gitea client doesn't provide an easy way to detect http response codes...
-	// https://gitea.com/gitea/go-sdk/issues/303
-
-	ClientNotFound = "404 Not Found"
-)
-
 var (
 	// gitea corrently doesn't have any auth scope
 	GiteaOauth2Scopes = []string{""}
@@ -54,6 +45,8 @@ var (
 
 type Opts struct {
 	APIURL         string
+	UserName       string
+	Password       string
 	Token          string
 	SkipVerify     bool
 	Oauth2ClientID string
@@ -92,7 +85,7 @@ func parseRepoPath(repopath string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func New(opts Opts) (*Client, error) {
+func newHTTPClient(opts Opts) *http.Client {
 	// copied from net/http until it has a clone function: https://github.com/golang/go/issues/26013
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
@@ -107,10 +100,34 @@ func New(opts Opts) (*Client, error) {
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: opts.SkipVerify},
 	}
-	httpClient := &http.Client{Transport: transport}
 
-	client := gitea.NewClient(opts.APIURL, opts.Token)
-	client.SetHTTPClient(httpClient)
+	return &http.Client{Transport: transport}
+}
+
+func New(opts Opts) (*Client, error) {
+	httpClient := newHTTPClient(opts)
+
+	client, err := gitea.NewClient(opts.APIURL, gitea.SetToken(opts.Token), gitea.SetHTTPClient(httpClient))
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create gitea client")
+	}
+
+	return &Client{
+		client:           client,
+		oauth2HTTPClient: httpClient,
+		APIURL:           opts.APIURL,
+		oauth2ClientID:   opts.Oauth2ClientID,
+		oauth2Secret:     opts.Oauth2Secret,
+	}, nil
+}
+
+func NewWithBasicAuth(opts Opts) (*Client, error) {
+	httpClient := newHTTPClient(opts)
+
+	client, err := gitea.NewClient(opts.APIURL, gitea.SetBasicAuth(opts.UserName, opts.Password), gitea.SetHTTPClient(httpClient))
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to create gitea client")
+	}
 
 	return &Client{
 		client:           client,
@@ -163,64 +180,52 @@ func (c *Client) RefreshOauth2Token(refreshToken string) (*oauth2.Token, error) 
 	return ntoken, errors.WithStack(err)
 }
 
-func (c *Client) LoginPassword(username, password, tokenName string) (string, error) {
+func (c *Client) CreateAccessToken(tokenName string) (string, error) {
 	// try to get agola access token if it already exists
-	// use custom http call since gitea api client doesn't provide an easy way to
-	// guess if the username/password login failed
-	// https://gitea.com/gitea/go-sdk/issues/303
+	var hasAccessToken bool
 
-	var accessToken string
-
-	tokens := make([]*gitea.AccessToken, 0, 10)
-	req, err := http.NewRequest("GET", c.APIURL+"/api/v1"+fmt.Sprintf("/users/%s/tokens", username), nil)
+	tokens, resp, err := c.client.ListAccessTokens(gitea.ListAccessTokensOptions{})
 	if err != nil {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return "", errors.WithStack(gitsource.ErrUnauthorized)
+		}
 		return "", errors.WithStack(err)
 	}
-	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 
-	resp, err := c.oauth2HTTPClient.Do(req)
-	if err != nil {
-		return "", errors.WithStack(err)
-	}
-	if resp.StatusCode == http.StatusUnauthorized {
-		return "", errors.WithStack(gitsource.ErrUnauthorized)
-	}
-	if resp.StatusCode/100 != 2 {
-		return "", errors.Errorf("gitea api status code %d", resp.StatusCode)
-	}
-	defer resp.Body.Close()
-
-	dec := json.NewDecoder(resp.Body)
-	if err := dec.Decode(&tokens); err != nil {
-		return "", errors.WithStack(err)
-	}
 	for _, token := range tokens {
 		if token.Name == tokenName {
-			accessToken = token.Token
+			hasAccessToken = true
 			break
 		}
 	}
 
-	// create access token
-	if accessToken == "" {
-		c.client.SetBasicAuth(username, password)
-		token, terr := c.client.CreateAccessToken(
-			gitea.CreateAccessTokenOption{Name: tokenName},
-		)
-		if terr != nil {
-			return "", errors.WithStack(terr)
+	// remove existing access token
+	if hasAccessToken {
+		if _, err := c.client.DeleteAccessToken(tokenName); err != nil {
+			return "", errors.WithStack(err)
 		}
-		accessToken = token.Token
 	}
+
+	token, _, terr := c.client.CreateAccessToken(
+		gitea.CreateAccessTokenOption{Name: tokenName},
+	)
+	if terr != nil {
+		return "", errors.WithStack(terr)
+	}
+	accessToken := token.Token
 
 	return accessToken, nil
 }
 
 func (c *Client) GetUserInfo() (*gitsource.UserInfo, error) {
-	user, err := c.client.GetMyUserInfo()
+	user, resp, err := c.client.GetMyUserInfo()
 	if err != nil {
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, errors.WithStack(gitsource.ErrUnauthorized)
+		}
 		return nil, errors.WithStack(err)
 	}
+
 	return &gitsource.UserInfo{
 		ID:        strconv.FormatInt(user.ID, 10),
 		LoginName: user.UserName,
@@ -233,7 +238,7 @@ func (c *Client) GetRepoInfo(repopath string) (*gitsource.RepoInfo, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	rr, err := c.client.GetRepo(owner, reponame)
+	rr, _, err := c.client.GetRepo(owner, reponame)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -245,7 +250,7 @@ func (c *Client) GetFile(repopath, commit, file string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	data, err := c.client.GetFile(owner, reponame, commit, file)
+	data, _, err := c.client.GetFile(owner, reponame, commit, file)
 	return data, errors.WithStack(err)
 }
 
@@ -254,7 +259,7 @@ func (c *Client) CreateDeployKey(repopath, title, pubKey string, readonly bool) 
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if _, err = c.client.CreateDeployKey(owner, reponame, gitea.CreateKeyOption{
+	if _, _, err = c.client.CreateDeployKey(owner, reponame, gitea.CreateKeyOption{
 		Title:    title,
 		Key:      pubKey,
 		ReadOnly: readonly,
@@ -274,7 +279,7 @@ func (c *Client) UpdateDeployKey(repopath, title, pubKey string, readonly bool) 
 	// the same value it is correctly readded and the admin must force a
 	// authorized_keys regeneration on the server. To avoid this we update it only
 	// when the public key value has changed
-	keys, err := c.client.ListDeployKeys(owner, reponame, gitea.ListDeployKeysOptions{})
+	keys, _, err := c.client.ListDeployKeys(owner, reponame, gitea.ListDeployKeysOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "error retrieving existing deploy keys")
 	}
@@ -284,13 +289,13 @@ func (c *Client) UpdateDeployKey(repopath, title, pubKey string, readonly bool) 
 			if key.Key == pubKey {
 				return nil
 			}
-			if err := c.client.DeleteDeployKey(owner, reponame, key.ID); err != nil {
+			if _, err := c.client.DeleteDeployKey(owner, reponame, key.ID); err != nil {
 				return errors.Wrapf(err, "error removing existing deploy key")
 			}
 		}
 	}
 
-	if _, err := c.client.CreateDeployKey(owner, reponame, gitea.CreateKeyOption{
+	if _, _, err := c.client.CreateDeployKey(owner, reponame, gitea.CreateKeyOption{
 		Title:    title,
 		Key:      pubKey,
 		ReadOnly: readonly,
@@ -306,14 +311,14 @@ func (c *Client) DeleteDeployKey(repopath, title string) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	keys, err := c.client.ListDeployKeys(owner, reponame, gitea.ListDeployKeysOptions{})
+	keys, _, err := c.client.ListDeployKeys(owner, reponame, gitea.ListDeployKeysOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "error retrieving existing deploy keys")
 	}
 
 	for _, key := range keys {
 		if key.Title == title {
-			if err := c.client.DeleteDeployKey(owner, reponame, key.ID); err != nil {
+			if _, err := c.client.DeleteDeployKey(owner, reponame, key.ID); err != nil {
 				return errors.Wrapf(err, "error removing existing deploy key")
 			}
 		}
@@ -339,7 +344,7 @@ func (c *Client) CreateRepoWebhook(repopath, url, secret string) error {
 		Active: true,
 	}
 
-	if _, err = c.client.CreateRepoHook(owner, reponame, opts); err != nil {
+	if _, _, err = c.client.CreateRepoHook(owner, reponame, opts); err != nil {
 		return errors.Wrapf(err, "error creating repository webhook")
 	}
 
@@ -351,7 +356,7 @@ func (c *Client) DeleteRepoWebhook(repopath, u string) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	hooks, err := c.client.ListRepoHooks(owner, reponame, gitea.ListHooksOptions{})
+	hooks, _, err := c.client.ListRepoHooks(owner, reponame, gitea.ListHooksOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "error retrieving repository webhooks")
 	}
@@ -360,7 +365,7 @@ func (c *Client) DeleteRepoWebhook(repopath, u string) error {
 	// projects
 	for _, hook := range hooks {
 		if hook.Config["url"] == u {
-			if err := c.client.DeleteRepoHook(owner, reponame, hook.ID); err != nil {
+			if _, err := c.client.DeleteRepoHook(owner, reponame, hook.ID); err != nil {
 				return errors.Wrapf(err, "error deleting existing repository webhook")
 			}
 		}
@@ -374,7 +379,7 @@ func (c *Client) CreateCommitStatus(repopath, commitSHA string, status gitsource
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	_, err = c.client.CreateStatus(owner, reponame, commitSHA, gitea.CreateStatusOption{
+	_, _, err = c.client.CreateStatus(owner, reponame, commitSHA, gitea.CreateStatusOption{
 		State:       fromCommitStatus(status),
 		TargetURL:   targetURL,
 		Description: description,
@@ -388,7 +393,7 @@ func (c *Client) ListUserRepos() ([]*gitsource.RepoInfo, error) {
 	repos := []*gitsource.RepoInfo{}
 
 	for {
-		remoteRepos, err := c.client.ListMyRepos(
+		remoteRepos, _, err := c.client.ListMyRepos(
 			gitea.ListReposOptions{
 				ListOptions: gitea.ListOptions{
 					Page:     page,
@@ -420,11 +425,12 @@ func (c *Client) ListUserRepos() ([]*gitsource.RepoInfo, error) {
 
 func fromGiteaRepo(rr *gitea.Repository) *gitsource.RepoInfo {
 	return &gitsource.RepoInfo{
-		ID:           strconv.FormatInt(rr.ID, 10),
-		Path:         path.Join(rr.Owner.UserName, rr.Name),
-		HTMLURL:      rr.HTMLURL,
-		SSHCloneURL:  rr.SSHURL,
-		HTTPCloneURL: rr.CloneURL,
+		ID:            strconv.FormatInt(rr.ID, 10),
+		Path:          path.Join(rr.Owner.UserName, rr.Name),
+		HTMLURL:       rr.HTMLURL,
+		SSHCloneURL:   rr.SSHURL,
+		HTTPCloneURL:  rr.CloneURL,
+		DefaultBranch: rr.DefaultBranch,
 	}
 }
 
@@ -434,7 +440,7 @@ func (c *Client) GetRef(repopath, ref string) (*gitsource.Ref, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	remoteRefs, err := c.client.GetRepoRefs(owner, reponame, ref)
+	remoteRefs, _, err := c.client.GetRepoRefs(owner, reponame, ref)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -485,7 +491,7 @@ func (c *Client) GetCommit(repopath, commitSHA string) (*gitsource.Commit, error
 		return nil, errors.WithStack(err)
 	}
 
-	commit, err := c.client.GetSingleCommit(owner, reponame, commitSHA)
+	commit, _, err := c.client.GetSingleCommit(owner, reponame, commitSHA)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

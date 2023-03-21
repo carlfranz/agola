@@ -13,7 +13,7 @@ local dind_runtime(arch) = {
   arch: arch,
   containers: [
     {
-      image: 'docker:stable-dind',
+      image: 'docker:23.0.1-dind',
       privileged: true,
       entrypoint: 'dockerd --bip 172.18.0.1/16',
     },
@@ -32,11 +32,11 @@ local task_build_go(version, arch) = {
     { type: 'run', command: 'make' },
     { type: 'save_cache', key: 'cache-sum-{{ md5sum "go.sum" }}', contents: [{ source_dir: '/go/pkg/mod/cache' }] },
     { type: 'save_cache', key: 'cache-date-{{ year }}-{{ month }}-{{ day }}', contents: [{ source_dir: '/go/pkg/mod/cache' }] },
-    { type: 'run', name: 'install golangci-lint', command: 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.45.2' },
+    { type: 'run', name: 'install golangci-lint', command: 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.51.2' },
     { type: 'run', command: 'golangci-lint run --deadline 5m' },
     { type: 'run', name: 'build docker/k8s drivers tests binary', command: 'CGO_ENABLED=0 go test -c ./internal/services/executor/driver -o ./bin/docker-tests' },
     { type: 'run', name: 'build integration tests binary', command: 'go test -tags "sqlite_unlock_notify" -c ./tests -o ./bin/integration-tests' },
-    { type: 'run', name: 'run tests', command: 'SKIP_DOCKER_TESTS=1 SKIP_K8S_TESTS=1 go test -tags "sqlite_unlock_notify" -v -count 1 $(go list ./... | grep -v /tests)' },
+    { type: 'run', name: 'run tests', command: 'SKIP_DOCKER_TESTS=1 SKIP_K8S_TESTS=1 go test -tags "sqlite_unlock_notify" -v -count 1 -parallel 5 $(go list ./... | grep -v /tests)' },
     { type: 'run', name: 'fetch gitea binary for integration tests', command: 'curl -L https://github.com/go-gitea/gitea/releases/download/v1.15.11/gitea-1.15.11-linux-amd64 -o ./bin/gitea && chmod +x ./bin/gitea' },
     { type: 'save_to_workspace', contents: [{ source_dir: './bin', dest_dir: '/bin/', paths: ['*'] }] },
   ],
@@ -68,7 +68,7 @@ local task_build_push_images(name, target, push) =
       arch: 'amd64',
       containers: [
         {
-          image: 'gcr.io/kaniko-project/executor:debug-v0.11.0',
+          image: 'gcr.io/kaniko-project/executor:v1.9.1-debug',
         },
       ],
     },
@@ -107,7 +107,7 @@ local task_build_push_images(name, target, push) =
         [
           task_build_go(version, arch),
         ]
-        for version in ['1.17', '1.18']
+        for version in ['1.19', '1.20']
         for arch in ['amd64' /*, 'arm64' */]
       ]) + [
         {
@@ -115,10 +115,10 @@ local task_build_push_images(name, target, push) =
           runtime: dind_runtime('amd64'),
           steps: [
             { type: 'restore_workspace', dest_dir: '.' },
-            { type: 'run', command: 'SKIP_K8S_TESTS=1 AGOLA_TOOLBOX_PATH="./bin" ./bin/docker-tests -test.parallel 1 -test.v' },
+            { type: 'run', command: 'SKIP_K8S_TESTS=1 AGOLA_TOOLBOX_PATH="./bin" ./bin/docker-tests -test.parallel 5 -test.v' },
           ],
           depends: [
-            'build go 1.18 amd64',
+            'build go 1.20 amd64',
           ],
         },
         {
@@ -132,15 +132,16 @@ local task_build_push_images(name, target, push) =
               command: |||
                 apk --no-cache add ca-certificates wget
                 wget -q -O /etc/apk/keys/sgerrand.rsa.pub https://alpine-pkgs.sgerrand.com/sgerrand.rsa.pub
-                wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.29-r0/glibc-2.29-r0.apk
-                apk add glibc-2.29-r0.apk
+                wget https://github.com/sgerrand/alpine-pkg-glibc/releases/download/2.34-r0/glibc-2.34-r0.apk
+                apk del libc6-compat
+                apk add --force-overwrite glibc-2.34-r0.apk
               |||,
             },
             { type: 'restore_workspace', dest_dir: '.' },
-            { type: 'run', name: 'integration tests', command: 'AGOLA_BIN_DIR="./bin" GITEA_PATH=${PWD}/bin/gitea DOCKER_BRIDGE_ADDRESS="172.18.0.1" ./bin/integration-tests -test.parallel 1 -test.v' },
+            { type: 'run', name: 'integration tests', command: 'AGOLA_BIN_DIR="./bin" GITEA_PATH=${PWD}/bin/gitea DOCKER_BRIDGE_ADDRESS="172.18.0.1" ./bin/integration-tests -test.parallel 3 -test.v' },
           ],
           depends: [
-            'build go 1.18 amd64',
+            'build go 1.20 amd64',
           ],
         },
         {

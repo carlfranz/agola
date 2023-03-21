@@ -132,6 +132,7 @@ func NewConfigstore(ctx context.Context, log zerolog.Logger, c *config.Configsto
 }
 
 func (s *Configstore) setupDefaultRouter() http.Handler {
+	maintenanceStatusHandler := api.NewMaintenanceStatusHandler(s.log, s.ah, false)
 	maintenanceModeHandler := api.NewMaintenanceModeHandler(s.log, s.ah)
 	exportHandler := api.NewExportHandler(s.log, s.ah)
 	importHandler := api.NewImportHandler(s.log, s.ah)
@@ -163,6 +164,8 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	createUserHandler := api.NewCreateUserHandler(s.log, s.ah)
 	updateUserHandler := api.NewUpdateUserHandler(s.log, s.ah)
 	deleteUserHandler := api.NewDeleteUserHandler(s.log, s.ah)
+	userOrgInvitationsHandler := api.NewUserOrgInvitationsHandler(s.log, s.ah)
+	userOrgInvitationActionHandler := api.NewOrgInvitationActionHandler(s.log, s.ah)
 
 	userLinkedAccountsHandler := api.NewUserLinkedAccountsHandler(s.log, s.ah)
 	createUserLAHandler := api.NewCreateUserLAHandler(s.log, s.ah)
@@ -178,7 +181,9 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	orgHandler := api.NewOrgHandler(s.log, s.d)
 	orgsHandler := api.NewOrgsHandler(s.log, s.d)
 	createOrgHandler := api.NewCreateOrgHandler(s.log, s.ah)
+	updateOrgHandler := api.NewUpdateOrgHandler(s.log, s.ah)
 	deleteOrgHandler := api.NewDeleteOrgHandler(s.log, s.ah)
+	orgInvitationsHandler := api.NewOrgInvitationsHandler(s.log, s.ah)
 
 	orgMembersHandler := api.NewOrgMembersHandler(s.log, s.ah)
 	addOrgMemberHandler := api.NewAddOrgMemberHandler(s.log, s.ah)
@@ -189,6 +194,12 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	createRemoteSourceHandler := api.NewCreateRemoteSourceHandler(s.log, s.ah)
 	updateRemoteSourceHandler := api.NewUpdateRemoteSourceHandler(s.log, s.ah)
 	deleteRemoteSourceHandler := api.NewDeleteRemoteSourceHandler(s.log, s.ah)
+
+	linkedAccountsHandler := api.NewLinkedAccountsHandler(s.log, s.d)
+
+	createOrgInvitationHandler := api.NewCreateOrgInvitationHandler(s.log, s.ah)
+	deleteOrgInvitationHandler := api.NewDeleteOrgInvitationHandler(s.log, s.ah)
+	orgInvitationHandler := api.NewOrgInvitationHandler(s.log, s.ah)
 
 	router := mux.NewRouter()
 	apirouter := router.PathPrefix("/api/v1alpha").Subrouter().UseEncodedPath()
@@ -228,6 +239,7 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	apirouter.Handle("/users", createUserHandler).Methods("POST")
 	apirouter.Handle("/users/{userref}", updateUserHandler).Methods("PUT")
 	apirouter.Handle("/users/{userref}", deleteUserHandler).Methods("DELETE")
+	apirouter.Handle("/users/{userref}/org_invitations", userOrgInvitationsHandler).Methods("GET")
 
 	apirouter.Handle("/users/{userref}/linkedaccounts", userLinkedAccountsHandler).Methods("GET")
 	apirouter.Handle("/users/{userref}/linkedaccounts", createUserLAHandler).Methods("POST")
@@ -242,10 +254,16 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	apirouter.Handle("/orgs/{orgref}", orgHandler).Methods("GET")
 	apirouter.Handle("/orgs", orgsHandler).Methods("GET")
 	apirouter.Handle("/orgs", createOrgHandler).Methods("POST")
+	apirouter.Handle("/orgs/{orgref}", updateOrgHandler).Methods("PUT")
 	apirouter.Handle("/orgs/{orgref}", deleteOrgHandler).Methods("DELETE")
 	apirouter.Handle("/orgs/{orgref}/members", orgMembersHandler).Methods("GET")
 	apirouter.Handle("/orgs/{orgref}/members/{userref}", addOrgMemberHandler).Methods("PUT")
 	apirouter.Handle("/orgs/{orgref}/members/{userref}", removeOrgMemberHandler).Methods("DELETE")
+	apirouter.Handle("/orgs/{orgref}/invitations", orgInvitationsHandler).Methods("GET")
+	apirouter.Handle("/orgs/{orgref}/invitations", createOrgInvitationHandler).Methods("POST")
+	apirouter.Handle("/orgs/{orgref}/invitations/{userref}", orgInvitationHandler).Methods("GET")
+	apirouter.Handle("/orgs/{orgref}/invitations/{userref}", deleteOrgInvitationHandler).Methods("DELETE")
+	apirouter.Handle("/orgs/{orgref}/invitations/{userref}/actions", userOrgInvitationActionHandler).Methods("PUT")
 
 	apirouter.Handle("/remotesources/{remotesourceref}", remoteSourceHandler).Methods("GET")
 	apirouter.Handle("/remotesources", remoteSourcesHandler).Methods("GET")
@@ -253,6 +271,9 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	apirouter.Handle("/remotesources/{remotesourceref}", updateRemoteSourceHandler).Methods("PUT")
 	apirouter.Handle("/remotesources/{remotesourceref}", deleteRemoteSourceHandler).Methods("DELETE")
 
+	apirouter.Handle("/linkedaccounts", linkedAccountsHandler).Methods("GET")
+
+	apirouter.Handle("/maintenance", maintenanceStatusHandler).Methods("GET")
 	apirouter.Handle("/maintenance", maintenanceModeHandler).Methods("PUT", "DELETE")
 
 	apirouter.Handle("/export", exportHandler).Methods("GET")
@@ -265,6 +286,7 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 }
 
 func (s *Configstore) setupMaintenanceRouter() http.Handler {
+	maintenanceStatusHandler := api.NewMaintenanceStatusHandler(s.log, s.ah, true)
 	maintenanceModeHandler := api.NewMaintenanceModeHandler(s.log, s.ah)
 	exportHandler := api.NewExportHandler(s.log, s.ah)
 	importHandler := api.NewImportHandler(s.log, s.ah)
@@ -272,6 +294,7 @@ func (s *Configstore) setupMaintenanceRouter() http.Handler {
 	router := mux.NewRouter()
 	apirouter := router.PathPrefix("/api/v1alpha").Subrouter().UseEncodedPath()
 
+	apirouter.Handle("/maintenance", maintenanceStatusHandler).Methods("GET")
 	apirouter.Handle("/maintenance", maintenanceModeHandler).Methods("PUT", "DELETE")
 
 	apirouter.Handle("/export", exportHandler).Methods("GET")

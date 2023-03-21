@@ -69,6 +69,48 @@ func (h *CreateOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type UpdateOrgHandler struct {
+	log zerolog.Logger
+	ah  *action.ActionHandler
+}
+
+func NewUpdateOrgHandler(log zerolog.Logger, ah *action.ActionHandler) *UpdateOrgHandler {
+	return &UpdateOrgHandler{log: log, ah: ah}
+}
+
+func (h *UpdateOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgRef := vars["orgref"]
+
+	var req gwapitypes.UpdateOrgRequest
+	d := json.NewDecoder(r.Body)
+	if err := d.Decode(&req); err != nil {
+		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
+		return
+	}
+
+	var visibility *cstypes.Visibility
+	if req.Visibility != nil {
+		v := cstypes.Visibility(*req.Visibility)
+		visibility = &v
+	}
+	creq := &action.UpdateOrgRequest{
+		Visibility: visibility,
+	}
+
+	org, err := h.ah.UpdateOrg(ctx, orgRef, creq)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	res := createOrgResponse(org)
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
 type DeleteOrgHandler struct {
 	log zerolog.Logger
 	ah  *action.ActionHandler
@@ -295,5 +337,192 @@ func (h *RemoveOrgMemberHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
 		h.log.Err(err).Send()
+	}
+}
+
+type CreateOrgInvitationHandler struct {
+	log zerolog.Logger
+	ah  *action.ActionHandler
+}
+
+func NewCreateOrgInvitationHandler(log zerolog.Logger, ah *action.ActionHandler) *CreateOrgInvitationHandler {
+	return &CreateOrgInvitationHandler{log: log, ah: ah}
+}
+
+func (h *CreateOrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgRef := vars["orgref"]
+
+	var req gwapitypes.CreateOrgInvitationRequest
+	d := json.NewDecoder(r.Body)
+	if err := d.Decode(&req); err != nil {
+		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
+		return
+	}
+
+	creq := &action.CreateOrgInvitationRequest{
+		UserRef:         req.UserRef,
+		OrganizationRef: orgRef,
+		Role:            req.Role,
+	}
+
+	cOrgInvitation, err := h.ah.CreateOrgInvitation(ctx, creq)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	res := createOrgInvitationResponse(cOrgInvitation.OrgInvitation, cOrgInvitation.Organization)
+	if err := util.HTTPResponse(w, http.StatusCreated, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+type OrgInvitationsHandler struct {
+	log zerolog.Logger
+	ah  *action.ActionHandler
+}
+
+func NewOrgInvitationsHandler(log zerolog.Logger, ah *action.ActionHandler) *OrgInvitationsHandler {
+	return &OrgInvitationsHandler{log: log, ah: ah}
+}
+
+func (h *OrgInvitationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	query := r.URL.Query()
+
+	orgRef := vars["orgref"]
+
+	limitS := query.Get("limit")
+	limit := DefaultRunsLimit
+	if limitS != "" {
+		var err error
+		limit, err = strconv.Atoi(limitS)
+		if err != nil {
+			util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse limit")))
+			return
+		}
+	}
+	if limit < 0 {
+		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Errorf("limit must be greater or equal than 0")))
+		return
+	}
+	if limit > MaxOrgInvitationsLimit {
+		limit = MaxOrgInvitationsLimit
+	}
+
+	orgInvitations, err := h.ah.GetOrgInvitations(ctx, orgRef, limit)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, orgInvitations); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+type OrgInvitationHandler struct {
+	log zerolog.Logger
+	ah  *action.ActionHandler
+}
+
+func NewOrgInvitationHandler(log zerolog.Logger, ah *action.ActionHandler) *OrgInvitationHandler {
+	return &OrgInvitationHandler{log: log, ah: ah}
+}
+
+func (h *OrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgRef := vars["orgref"]
+	userRef := vars["userref"]
+
+	orgInvitation, err := h.ah.GetOrgInvitation(ctx, orgRef, userRef)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	resp := createOrgInvitationResponse(orgInvitation.OrgInvitation, orgInvitation.Organization)
+	if err := util.HTTPResponse(w, http.StatusOK, resp); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+type UserOrgInvitationActionHandler struct {
+	log zerolog.Logger
+	ah  *action.ActionHandler
+}
+
+func NewUserOrgInvitationActionHandler(log zerolog.Logger, ah *action.ActionHandler) *UserOrgInvitationActionHandler {
+	return &UserOrgInvitationActionHandler{log: log, ah: ah}
+}
+
+func (h *UserOrgInvitationActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgRef := vars["orgref"]
+
+	var req gwapitypes.OrgInvitationActionRequest
+	d := json.NewDecoder(r.Body)
+	if err := d.Decode(&req); err != nil {
+		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
+		return
+	}
+
+	areq := &action.OrgInvitationActionRequest{
+		OrgRef: orgRef,
+		Action: req.Action,
+	}
+	err := h.ah.OrgInvitationAction(ctx, areq)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, nil); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+type DeleteOrgInvitationHandler struct {
+	log zerolog.Logger
+	ah  *action.ActionHandler
+}
+
+func NewDeleteOrgInvitationHandler(log zerolog.Logger, ah *action.ActionHandler) *DeleteOrgInvitationHandler {
+	return &DeleteOrgInvitationHandler{log: log, ah: ah}
+}
+
+func (h *DeleteOrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgRef := vars["orgref"]
+	userRef := vars["userref"]
+
+	err := h.ah.DeleteOrgInvitation(ctx, orgRef, userRef)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+const (
+	DefaultOrgInvitationsLimit = 25
+	MaxOrgInvitationsLimit     = 40
+)
+
+func createOrgInvitationResponse(orgInvitation *cstypes.OrgInvitation, org *cstypes.Organization) *gwapitypes.OrgInvitationResponse {
+	return &gwapitypes.OrgInvitationResponse{
+		ID:               orgInvitation.ID,
+		UserID:           orgInvitation.UserID,
+		OrganizationID:   org.ID,
+		OrganizationName: org.Name,
 	}
 }

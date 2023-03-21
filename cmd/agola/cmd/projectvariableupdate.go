@@ -16,7 +16,7 @@ package cmd
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 
 	"agola.io/agola/internal/errors"
@@ -75,12 +75,12 @@ func variableUpdate(cmd *cobra.Command, ownertype string, args []string) error {
 	var data []byte
 	var err error
 	if variableUpdateOpts.file == "-" {
-		data, err = ioutil.ReadAll(os.Stdin)
+		data, err = io.ReadAll(os.Stdin)
 		if err != nil {
 			return errors.WithStack(err)
 		}
 	} else {
-		data, err = ioutil.ReadFile(variableUpdateOpts.file)
+		data, err = os.ReadFile(variableUpdateOpts.file)
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -88,7 +88,7 @@ func variableUpdate(cmd *cobra.Command, ownertype string, args []string) error {
 
 	var values []VariableValue
 	if err := yaml.Unmarshal(data, &values); err != nil {
-		log.Fatal().Msgf("failed to unmarshall values: %v", err)
+		return errors.Wrapf(err, "failed to unmarshall values")
 	}
 	rvalues := []gwapitypes.VariableValueRequest{}
 	for _, value := range values {
