@@ -19,12 +19,12 @@ import (
 	"fmt"
 	"sort"
 
-	"agola.io/agola/internal/errors"
+	"github.com/rs/zerolog/log"
+	"github.com/sorintlab/errors"
+	"github.com/spf13/cobra"
+
 	gwapitypes "agola.io/agola/services/gateway/api/types"
 	gwclient "agola.io/agola/services/gateway/client"
-
-	"github.com/rs/zerolog/log"
-	"github.com/spf13/cobra"
 )
 
 var cmdRunList = &cobra.Command{
@@ -133,9 +133,9 @@ func runList(cmd *cobra.Command, args []string) error {
 		for _, task := range run.Tasks {
 			var runTaskResponse *gwapitypes.RunTaskResponse
 			if isProject {
-				runTaskResponse, _, err = gwclient.GetUserRunTask(context.TODO(), runListOpts.projectRef, run.Number, task.ID)
+				runTaskResponse, _, err = gwclient.GetProjectRunTask(context.TODO(), runListOpts.projectRef, run.Number, task.ID)
 			} else {
-				runTaskResponse, _, err = gwclient.GetProjectRunTask(context.TODO(), runListOpts.username, run.Number, task.ID)
+				runTaskResponse, _, err = gwclient.GetUserRunTask(context.TODO(), runListOpts.username, run.Number, task.ID)
 			}
 			t := &taskDetails{
 				name:            task.Name,

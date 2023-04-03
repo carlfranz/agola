@@ -18,16 +18,16 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"agola.io/agola/internal/errors"
+	"github.com/gorilla/mux"
+	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
 	"agola.io/agola/internal/services/configstore/action"
 	"agola.io/agola/internal/services/configstore/db"
 	"agola.io/agola/internal/sql"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
 	"agola.io/agola/services/configstore/types"
-
-	"github.com/gorilla/mux"
-	"github.com/rs/zerolog"
 )
 
 type VariablesHandler struct {

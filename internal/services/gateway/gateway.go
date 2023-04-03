@@ -21,8 +21,15 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/gorilla/csrf"
+	ghandlers "github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+	"github.com/sorintlab/errors"
+
 	icommon "agola.io/agola/internal/common"
-	"agola.io/agola/internal/errors"
 	"agola.io/agola/internal/objectstorage"
 	scommon "agola.io/agola/internal/services/common"
 	"agola.io/agola/internal/services/config"
@@ -33,13 +40,6 @@ import (
 	"agola.io/agola/internal/util"
 	csclient "agola.io/agola/services/configstore/client"
 	rsclient "agola.io/agola/services/runservice/client"
-
-	"github.com/golang-jwt/jwt/v4"
-	"github.com/gorilla/csrf"
-	ghandlers "github.com/gorilla/handlers"
-	"github.com/gorilla/mux"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -171,7 +171,7 @@ func (g *Gateway) Run(ctx context.Context) error {
 			http.StatusForbidden)
 	})))
 
-	skipCSRFOnToken := handlers.NewSkipCSRFOnToken(g.log)
+	skipCSRFOnToken := handlers.NewSkipCSRFOnTokenAuth(g.log)
 	setCSRFHeader := handlers.NewSetCSRFHeader(g.log)
 
 	CSRF := func(h http.Handler) http.Handler {
@@ -281,10 +281,12 @@ func (g *Gateway) Run(ctx context.Context) error {
 	apirouter := mux.NewRouter().PathPrefix("/api/v1alpha").Subrouter().UseEncodedPath()
 
 	authForcedHandler := func(h http.Handler) http.Handler {
-		return CSRF(handlers.NewAuthChecker(g.log, g.configstoreClient, handlers.WithTokenChecker(g.c.AdminToken), handlers.WithCookieChecker(g.sc, g.c.UnsecureCookies), handlers.WithRequired(true))(h))
+		// first do auth, then check csrf (skipping it only on successful token auth)
+		return handlers.NewAuthChecker(g.log, g.configstoreClient, handlers.WithTokenChecker(g.c.AdminToken), handlers.WithCookieChecker(g.sc, g.c.UnsecureCookies), handlers.WithRequired(true))(CSRF(h))
 	}
 	authOptionalHandler := func(h http.Handler) http.Handler {
-		return CSRF(handlers.NewAuthChecker(g.log, g.configstoreClient, handlers.WithTokenChecker(g.c.AdminToken), handlers.WithCookieChecker(g.sc, g.c.UnsecureCookies), handlers.WithRequired(false))(h))
+		// first do auth, then check csrf (skipping it only on successful token auth)
+		return handlers.NewAuthChecker(g.log, g.configstoreClient, handlers.WithTokenChecker(g.c.AdminToken), handlers.WithCookieChecker(g.sc, g.c.UnsecureCookies), handlers.WithRequired(false))(CSRF(h))
 	}
 
 	router.PathPrefix("/api/v1alpha").Handler(apirouter)

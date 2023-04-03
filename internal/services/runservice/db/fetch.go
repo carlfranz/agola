@@ -5,11 +5,11 @@ import (
 	stdsql "database/sql"
 	"encoding/json"
 
-	"agola.io/agola/internal/errors"
+	"github.com/sorintlab/errors"
+	sq "github.com/Masterminds/squirrel"
+
 	"agola.io/agola/internal/sql"
 	"agola.io/agola/services/runservice/types"
-
-	sq "github.com/Masterminds/squirrel"
 )
 
 func (d *DB) fetchSequences(tx *sql.Tx, q sq.Sqlizer) ([]*types.Sequence, []string, error) {

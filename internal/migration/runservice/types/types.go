@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"time"
 
-	"agola.io/agola/internal/errors"
+	"github.com/mitchellh/copystructure"
+	"github.com/sorintlab/errors"
+
 	"agola.io/agola/services/types"
 	"agola.io/agola/util"
-
-	"github.com/mitchellh/copystructure"
 )
 
 const (

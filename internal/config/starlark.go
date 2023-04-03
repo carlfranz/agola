@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"agola.io/agola/internal/errors"
+	"github.com/sorintlab/errors"
 	"go.starlark.net/starlark"
 )
 

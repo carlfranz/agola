@@ -20,11 +20,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"agola.io/agola/internal/errors"
-	"agola.io/agola/internal/util"
-
 	"github.com/gofrs/uuid"
 	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
+	"agola.io/agola/internal/util"
 )
 
 const (

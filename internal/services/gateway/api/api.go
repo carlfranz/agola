@@ -18,11 +18,11 @@ import (
 	"net/http"
 	"net/url"
 
-	"agola.io/agola/internal/errors"
+	"github.com/gorilla/mux"
+	"github.com/sorintlab/errors"
+
 	util "agola.io/agola/internal/util"
 	cstypes "agola.io/agola/services/configstore/types"
-
-	"github.com/gorilla/mux"
 )
 
 func GetConfigTypeRef(r *http.Request) (cstypes.ObjectKind, string, error) {

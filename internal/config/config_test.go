@@ -17,12 +17,12 @@ package config
 import (
 	"testing"
 
-	"agola.io/agola/internal/errors"
+	"github.com/google/go-cmp/cmp"
+	"github.com/sorintlab/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/types"
-
-	"github.com/google/go-cmp/cmp"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func TestParseConfig(t *testing.T) {

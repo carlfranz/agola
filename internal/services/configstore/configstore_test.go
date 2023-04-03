@@ -26,7 +26,11 @@ import (
 	"testing"
 	"time"
 
-	"agola.io/agola/internal/errors"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
 	"agola.io/agola/internal/services/config"
 	"agola.io/agola/internal/services/configstore/action"
 	"agola.io/agola/internal/sql"
@@ -34,10 +38,6 @@ import (
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/configstore/types"
 	stypes "agola.io/agola/services/types"
-
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/rs/zerolog"
 )
 
 func setupConfigstore(ctx context.Context, t *testing.T, log zerolog.Logger, dir string) *Configstore {

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"agola.io/agola/internal/errors"
-	scommon "agola.io/agola/internal/services/common"
-
 	"github.com/gofrs/uuid"
+	"github.com/sorintlab/errors"
+
+	scommon "agola.io/agola/internal/services/common"
 )
 
 type ContextKey int
@@ -18,6 +18,8 @@ const (
 	ContextKeyUserID ContextKey = iota
 	ContextKeyUsername
 	ContextKeyUserAdmin
+
+	ContextKeyTokenAuth
 )
 
 func CurrentUserID(ctx context.Context) string {

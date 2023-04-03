@@ -21,9 +21,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
 	scommon "agola.io/agola/internal/common"
 	idb "agola.io/agola/internal/db"
-	"agola.io/agola/internal/errors"
 	"agola.io/agola/internal/lock"
 	"agola.io/agola/internal/objectstorage"
 	"agola.io/agola/internal/services/config"
@@ -32,9 +35,6 @@ import (
 	"agola.io/agola/internal/services/runservice/db"
 	"agola.io/agola/internal/sql"
 	"agola.io/agola/internal/util"
-
-	"github.com/gorilla/mux"
-	"github.com/rs/zerolog"
 )
 
 func (s *Runservice) maintenanceModeWatcherLoop(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceModeEnabled bool) {

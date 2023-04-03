@@ -6,11 +6,10 @@ import (
 	"regexp"
 	"time"
 
-	"agola.io/agola/internal/errors"
-
 	"github.com/gofrs/uuid"
 	"github.com/lib/pq"
 	"github.com/mattn/go-sqlite3"
+	"github.com/sorintlab/errors"
 )
 
 type Type string

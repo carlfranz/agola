@@ -24,10 +24,10 @@ import (
 	"regexp"
 	"strings"
 
-	"agola.io/agola/internal/errors"
-	"agola.io/agola/internal/util"
-
 	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
+	"agola.io/agola/internal/util"
 )
 
 var (

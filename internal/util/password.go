@@ -15,8 +15,7 @@
 package util
 
 import (
-	"agola.io/agola/internal/errors"
-
+	"github.com/sorintlab/errors"
 	"golang.org/x/crypto/bcrypt"
 )
 

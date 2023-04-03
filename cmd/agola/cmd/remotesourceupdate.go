@@ -17,12 +17,12 @@ package cmd
 import (
 	"context"
 
-	"agola.io/agola/internal/errors"
+	"github.com/rs/zerolog/log"
+	"github.com/sorintlab/errors"
+	"github.com/spf13/cobra"
+
 	gwapitypes "agola.io/agola/services/gateway/api/types"
 	gwclient "agola.io/agola/services/gateway/client"
-
-	"github.com/rs/zerolog/log"
-	"github.com/spf13/cobra"
 )
 
 var cmdRemoteSourceUpdate = &cobra.Command{

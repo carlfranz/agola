@@ -20,7 +20,7 @@ import (
 	"log"
 	"os"
 
-	"agola.io/agola/internal/errors"
+	"github.com/sorintlab/errors"
 	"github.com/spf13/cobra"
 )
 

@@ -18,8 +18,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rs/zerolog/log"
+	"github.com/sorintlab/errors"
+	"github.com/spf13/cobra"
+
 	"agola.io/agola/cmd"
-	"agola.io/agola/internal/errors"
 	"agola.io/agola/internal/services/config"
 	"agola.io/agola/internal/services/configstore"
 	"agola.io/agola/internal/services/executor"
@@ -29,9 +32,6 @@ import (
 	"agola.io/agola/internal/services/runservice"
 	"agola.io/agola/internal/services/scheduler"
 	"agola.io/agola/internal/util"
-
-	"github.com/rs/zerolog/log"
-	"github.com/spf13/cobra"
 )
 
 var (

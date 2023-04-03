@@ -18,13 +18,12 @@ import (
 	"context"
 	"path"
 
-	"agola.io/agola/internal/errors"
-	"agola.io/agola/internal/sql"
+	"github.com/gofrs/uuid"
+	"github.com/sorintlab/errors"
 
+	"agola.io/agola/internal/sql"
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/configstore/types"
-
-	"github.com/gofrs/uuid"
 )
 
 func (h *ActionHandler) ValidateProjectReq(ctx context.Context, req *CreateUpdateProjectRequest) error {

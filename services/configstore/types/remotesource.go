@@ -17,12 +17,12 @@ package types
 import (
 	"encoding/json"
 
-	"agola.io/agola/internal/errors"
+	"github.com/gofrs/uuid"
+	"github.com/sorintlab/errors"
+
 	"agola.io/agola/internal/sql"
 	stypes "agola.io/agola/services/types"
 	"agola.io/agola/util"
-
-	"github.com/gofrs/uuid"
 )
 
 type RemoteSourceType string

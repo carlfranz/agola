@@ -18,11 +18,11 @@ import (
 	"os"
 	"time"
 
-	"agola.io/agola/internal/errors"
+	"github.com/sorintlab/errors"
+	yaml "gopkg.in/yaml.v2"
+
 	"agola.io/agola/internal/sql"
 	"agola.io/agola/internal/util"
-
-	yaml "gopkg.in/yaml.v2"
 )
 
 const (

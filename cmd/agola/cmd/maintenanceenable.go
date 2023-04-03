@@ -17,10 +17,11 @@ package cmd
 import (
 	"context"
 
-	"agola.io/agola/internal/errors"
-	gatewayclient "agola.io/agola/services/gateway/client"
 	"github.com/rs/zerolog/log"
+	"github.com/sorintlab/errors"
 	"github.com/spf13/cobra"
+
+	gatewayclient "agola.io/agola/services/gateway/client"
 )
 
 var cmdMaintenanceEnable = &cobra.Command{

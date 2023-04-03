@@ -19,8 +19,8 @@ import (
 	"math"
 	"testing"
 
-	"agola.io/agola/internal/errors"
 	"github.com/google/go-cmp/cmp"
+	"github.com/sorintlab/errors"
 	"go.starlark.net/starlark"
 )
 

@@ -7,16 +7,16 @@ import (
 	"path"
 	"strings"
 
+	sq "github.com/Masterminds/squirrel"
+	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
 	idb "agola.io/agola/internal/db"
-	"agola.io/agola/internal/errors"
 	"agola.io/agola/internal/services/configstore/common"
 	"agola.io/agola/internal/services/configstore/db/objects"
 	"agola.io/agola/internal/sql"
 	"agola.io/agola/services/configstore/types"
 	stypes "agola.io/agola/services/types"
-
-	sq "github.com/Masterminds/squirrel"
-	"github.com/rs/zerolog"
 )
 
 //go:generate ../../../../tools/bin/generators -component configstore

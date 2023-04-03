@@ -17,16 +17,16 @@ package api
 import (
 	"net/http"
 
-	"agola.io/agola/internal/errors"
+	"github.com/gorilla/mux"
+	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
 	gitsource "agola.io/agola/internal/gitsources"
 	"agola.io/agola/internal/services/gateway/action"
 	"agola.io/agola/internal/services/gateway/common"
 	"agola.io/agola/internal/util"
 	csclient "agola.io/agola/services/configstore/client"
 	gwapitypes "agola.io/agola/services/gateway/api/types"
-
-	"github.com/gorilla/mux"
-	"github.com/rs/zerolog"
 )
 
 func createRemoteRepoResponse(r *gitsource.RepoInfo) *gwapitypes.RemoteRepoResponse {

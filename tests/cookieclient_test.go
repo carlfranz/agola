@@ -23,7 +23,8 @@ import (
 	"net/url"
 	"strings"
 
-	"agola.io/agola/internal/errors"
+	"github.com/sorintlab/errors"
+
 	"agola.io/agola/internal/util"
 	gwapitypes "agola.io/agola/services/gateway/api/types"
 )
@@ -107,4 +108,19 @@ func (c *CookieClient) GetCurrentUser(ctx context.Context, cookies []*http.Cooki
 	user := new(gwapitypes.PrivateUserResponse)
 	resp, err := c.getParsedResponse(ctx, "GET", "/user", nil, jsonContent, cookies, nil, user)
 	return user, resp, errors.WithStack(err)
+}
+
+func (c *CookieClient) CreateOrg(ctx context.Context, req *gwapitypes.CreateOrgRequest, header http.Header, cookies []*http.Cookie) (*gwapitypes.OrgResponse, *http.Response, error) {
+	reqj, err := json.Marshal(req)
+	if err != nil {
+		return nil, nil, errors.WithStack(err)
+	}
+
+	for k, v := range jsonContent {
+		header[k] = v
+	}
+
+	org := new(gwapitypes.OrgResponse)
+	resp, err := c.getParsedResponse(ctx, "POST", "/orgs", nil, header, cookies, bytes.NewReader(reqj), org)
+	return org, resp, errors.WithStack(err)
 }

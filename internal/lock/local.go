@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"agola.io/agola/internal/errors"
+	"github.com/sorintlab/errors"
 	"golang.org/x/sync/semaphore"
 )
 

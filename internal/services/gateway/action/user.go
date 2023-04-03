@@ -23,7 +23,9 @@ import (
 	"strings"
 	"time"
 
-	"agola.io/agola/internal/errors"
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/sorintlab/errors"
+
 	gitsource "agola.io/agola/internal/gitsources"
 	"agola.io/agola/internal/gitsources/agolagit"
 	scommon "agola.io/agola/internal/services/common"
@@ -32,8 +34,6 @@ import (
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
 	cstypes "agola.io/agola/services/configstore/types"
-
-	"github.com/golang-jwt/jwt/v4"
 )
 
 const (

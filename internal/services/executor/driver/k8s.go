@@ -26,14 +26,10 @@ import (
 	"strings"
 	"time"
 
-	"agola.io/agola/internal/errors"
-	"agola.io/agola/internal/services/executor/registry"
-	"agola.io/agola/internal/util"
-	"agola.io/agola/services/types"
-
 	"github.com/docker/docker/pkg/archive"
 	"github.com/gofrs/uuid"
 	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -50,6 +46,10 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 	utilexec "k8s.io/utils/exec"
+
+	"agola.io/agola/internal/services/executor/registry"
+	"agola.io/agola/internal/util"
+	"agola.io/agola/services/types"
 )
 
 const (

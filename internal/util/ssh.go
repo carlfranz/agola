@@ -21,7 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 
-	"agola.io/agola/internal/errors"
+	"github.com/sorintlab/errors"
 	"golang.org/x/crypto/ssh"
 )
 

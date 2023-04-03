@@ -19,16 +19,16 @@ import (
 	"net/http"
 	"strconv"
 
-	"agola.io/agola/internal/errors"
+	"github.com/gorilla/mux"
+	"github.com/rs/zerolog"
+	"github.com/sorintlab/errors"
+
 	"agola.io/agola/internal/services/configstore/action"
 	"agola.io/agola/internal/services/configstore/db"
 	"agola.io/agola/internal/sql"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
 	"agola.io/agola/services/configstore/types"
-
-	"github.com/gorilla/mux"
-	"github.com/rs/zerolog"
 )
 
 type RemoteSourceHandler struct {
@@ -94,6 +94,7 @@ func (h *CreateRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		AuthType:            req.AuthType,
 		Oauth2ClientID:      req.Oauth2ClientID,
 		Oauth2ClientSecret:  req.Oauth2ClientSecret,
+		SSHHostKey:          req.SSHHostKey,
 		SkipSSHHostKeyCheck: req.SkipSSHHostKeyCheck,
 		RegistrationEnabled: req.RegistrationEnabled,
 		LoginEnabled:        req.LoginEnabled,
@@ -140,6 +141,7 @@ func (h *UpdateRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		AuthType:            req.AuthType,
 		Oauth2ClientID:      req.Oauth2ClientID,
 		Oauth2ClientSecret:  req.Oauth2ClientSecret,
+		SSHHostKey:          req.SSHHostKey,
 		SkipSSHHostKeyCheck: req.SkipSSHHostKeyCheck,
 		RegistrationEnabled: req.RegistrationEnabled,
 		LoginEnabled:        req.LoginEnabled,
