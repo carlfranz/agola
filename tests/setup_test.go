@@ -53,7 +53,6 @@ import (
 	"agola.io/agola/internal/services/notification"
 	rsscheduler "agola.io/agola/internal/services/runservice"
 	"agola.io/agola/internal/services/scheduler"
-	"agola.io/agola/internal/sql"
 	"agola.io/agola/internal/testutil"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
@@ -270,6 +269,11 @@ func setup(ctx context.Context, t *testing.T, dir string, opts ...setupOption) *
 		t.Fatalf("env var AGOLA_BIN_DIR is undefined")
 	}
 
+	dbType := testutil.DBType(t)
+	_, _, rsDBConnString := testutil.CreateDB(t, log, ctx, dir)
+	_, _, csDBConnString := testutil.CreateDB(t, log, ctx, dir)
+	_, _, notificationDBConnString := testutil.CreateDB(t, log, ctx, dir)
+
 	sc := &setupContext{ctx: ctx, t: t, dir: dir, log: log}
 
 	sc.config = &config.Config{
@@ -306,16 +310,16 @@ func setup(ctx context.Context, t *testing.T, dir string, opts ...setupOption) *
 			RunserviceURL:  "",
 			ConfigstoreURL: "",
 			DB: config.DB{
-				Type:       sql.Sqlite3,
-				ConnString: filepath.Join(dir, "notification", "db"),
+				Type:       dbType,
+				ConnString: notificationDBConnString,
 			},
 		},
 		Runservice: config.Runservice{
 			Debug:   false,
 			DataDir: filepath.Join(dir, "runservice"),
 			DB: config.DB{
-				Type:       sql.Sqlite3,
-				ConnString: filepath.Join(dir, "runservice", "db"),
+				Type:       dbType,
+				ConnString: rsDBConnString,
 			},
 			Web: config.Web{
 				ListenAddress: ":4000",
@@ -349,8 +353,8 @@ func setup(ctx context.Context, t *testing.T, dir string, opts ...setupOption) *
 			Debug:   false,
 			DataDir: filepath.Join(dir, "configstore"),
 			DB: config.DB{
-				Type:       sql.Sqlite3,
-				ConnString: filepath.Join(dir, "configstore", "db"),
+				Type:       dbType,
+				ConnString: csDBConnString,
 			},
 			Web: config.Web{
 				ListenAddress: ":4002",
@@ -4162,5 +4166,137 @@ func TestExportImport(t *testing.T) {
 	}
 	if len(orgs) != 0 {
 		t.Fatalf("expected 0 orgs got: %d", len(orgs))
+	}
+}
+
+func TestGetProjectRuns(t *testing.T) {
+	t.Parallel()
+
+	config := `
+    {
+		runs: [
+		  {
+			name: 'run01',
+			tasks: [
+			  {
+				name: 'task01',
+				runtime: {
+				  containers: [
+					{
+					  image: 'alpine/git',
+					},
+				  ],
+				},
+				steps: [
+				  { type: 'clone' },
+				  { type: 'run', command: 'env' },
+				],
+			  },
+			],
+		  },
+		],
+	}
+	`
+
+	tests := []struct {
+		name         string
+		phaseFilter  []string
+		resultFilter []string
+		num          int
+	}{
+		{
+			name: "test get all runs",
+			num:  1,
+		},
+		{
+			name:         "test get runs phase finished and result success",
+			phaseFilter:  []string{"finished"},
+			resultFilter: []string{"success"},
+			num:          1,
+		},
+		{
+			name:        "test get runs phase running",
+			phaseFilter: []string{"running"},
+			num:         0,
+		},
+		{
+			name:         "test get runs result failed",
+			resultFilter: []string{"failed"},
+			num:          0,
+		},
+		{
+			name:         "test get runs with all filters",
+			phaseFilter:  []string{"setuperror", "queued", "cancelled", "running", "finished"},
+			resultFilter: []string{"unknown", "stopped", "success", "failed"},
+			num:          1,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			sc := setup(ctx, t, dir, withGitea(true))
+			defer sc.stop()
+
+			giteaAPIURL := fmt.Sprintf("http://%s:%s", sc.gitea.HTTPListenAddress, sc.gitea.HTTPPort)
+
+			giteaToken, token := createLinkedAccount(ctx, t, sc.gitea, sc.config)
+
+			giteaClient, err := gitea.NewClient(giteaAPIURL, gitea.SetToken(giteaToken))
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+
+			gwClient := gwclient.NewClient(sc.config.Gateway.APIExposedURL, token)
+
+			giteaRepo, project := createProject(ctx, t, giteaClient, gwClient)
+
+			push(t, config, giteaRepo.CloneURL, giteaToken, "commit", false)
+
+			_ = testutil.Wait(30*time.Second, func() (bool, error) {
+				runs, _, err := gwClient.GetProjectRuns(ctx, project.ID, nil, nil, 0, 0, false)
+				if err != nil {
+					return false, nil
+				}
+
+				if len(runs) == 0 {
+					return false, nil
+				}
+				run := runs[0]
+				if run.Phase != rstypes.RunPhaseFinished {
+					return false, nil
+				}
+
+				return true, nil
+			})
+
+			runs, _, err := gwClient.GetProjectRuns(ctx, project.ID, tt.phaseFilter, tt.resultFilter, 0, 0, false)
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+
+			t.Logf("runs: %s", util.Dump(runs))
+
+			if len(runs) != tt.num {
+				t.Fatalf("expected %d run got: %d", tt.num, len(runs))
+			}
+
+			if len(runs) > 0 {
+				run := runs[0]
+				if run.Phase != rstypes.RunPhaseFinished {
+					t.Fatalf("expected run phase %q, got %q", rstypes.RunPhaseFinished, run.Phase)
+				}
+				if run.Result != rstypes.RunResultSuccess {
+					t.Fatalf("expected run result %q, got %q", rstypes.RunResultSuccess, run.Result)
+				}
+			}
+		})
 	}
 }

@@ -20,7 +20,7 @@ import (
 	"github.com/sorintlab/errors"
 
 	"agola.io/agola/internal/services/configstore/db"
-	"agola.io/agola/internal/sql"
+	"agola.io/agola/internal/sqlg/sql"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
 	"agola.io/agola/services/configstore/types"
@@ -197,15 +197,12 @@ func (h *ActionHandler) DeleteOrg(ctx context.Context, orgRef string) error {
 			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("org %q doesn't exist", orgRef))
 		}
 
-		orgInvitations, err := h.d.GetOrgInvitations(tx, org.ID)
-		if err != nil {
+		if err := h.d.DeleteOrgMembersByOrgID(tx, org.ID); err != nil {
 			return util.NewAPIError(util.KindFromRemoteError(err), err)
 		}
-		for _, invitation := range orgInvitations {
-			err = h.d.DeleteOrgInvitation(tx, invitation.ID)
-			if err != nil {
-				return util.NewAPIError(util.KindFromRemoteError(err), err)
-			}
+
+		if err := h.d.DeleteOrgInvitationsByOrgID(tx, org.ID); err != nil {
+			return util.NewAPIError(util.KindFromRemoteError(err), err)
 		}
 
 		// delete all projects and groups
