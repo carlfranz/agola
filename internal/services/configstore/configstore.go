@@ -28,24 +28,26 @@ import (
 
 	scommon "agola.io/agola/internal/common"
 	"agola.io/agola/internal/objectstorage"
+	"agola.io/agola/internal/services/common"
 	"agola.io/agola/internal/services/config"
 	action "agola.io/agola/internal/services/configstore/action"
 	"agola.io/agola/internal/services/configstore/api"
 	"agola.io/agola/internal/services/configstore/db"
+	"agola.io/agola/internal/services/handlers"
 	"agola.io/agola/internal/sqlg/lock"
 	"agola.io/agola/internal/sqlg/manager"
 	"agola.io/agola/internal/sqlg/sql"
 	"agola.io/agola/internal/util"
 )
 
-func (s *Configstore) maintenanceModeWatcherLoop(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceModeEnabled bool) {
-	s.log.Info().Msgf("maintenance mode watcher: maintenance mode enabled: %t", maintenanceModeEnabled)
+func (s *Configstore) maintenanceModeWatcherLoop(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceMode bool) {
+	s.log.Info().Msgf("maintenance mode watcher: maintenance mode enabled: %t", maintenanceMode)
 
 	for {
 		s.log.Debug().Msgf("maintenanceModeWatcherLoop")
 
 		// at first watch restart from previous processed revision
-		if err := s.maintenanceModeWatcher(ctx, runCtxCancel, maintenanceModeEnabled); err != nil {
+		if err := s.maintenanceModeWatcher(ctx, runCtxCancel, maintenanceMode); err != nil {
 			s.log.Err(err).Msgf("maintenance mode watcher error")
 		}
 
@@ -58,13 +60,13 @@ func (s *Configstore) maintenanceModeWatcherLoop(ctx context.Context, runCtxCanc
 	}
 }
 
-func (s *Configstore) maintenanceModeWatcher(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceModeEnabled bool) error {
+func (s *Configstore) maintenanceModeWatcher(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceMode bool) error {
 	maintenanceEnabled, err := s.ah.IsMaintenanceEnabled(ctx)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	if maintenanceEnabled != maintenanceModeEnabled {
+	if maintenanceEnabled != maintenanceMode {
 		s.log.Info().Msgf("maintenance mode changed to %t", maintenanceEnabled)
 		runCtxCancel()
 	}
@@ -123,43 +125,7 @@ func NewConfigstore(ctx context.Context, log zerolog.Logger, c *config.Configsto
 
 	dbm := manager.NewDBManager(log, d, lf)
 
-	setupDB := func() error {
-		if err := dbm.Lock(ctx); err != nil {
-			return errors.WithStack(err)
-		}
-		defer func() { _ = dbm.Unlock() }()
-
-		if err := dbm.Setup(ctx); err != nil {
-			return errors.Wrap(err, "setup db error")
-		}
-
-		curDBVersion, err := dbm.GetVersion(ctx)
-		if err != nil {
-			return errors.WithStack(err)
-		}
-
-		if err := dbm.CheckVersion(curDBVersion, d.Version()); err != nil {
-			return errors.WithStack(err)
-		}
-
-		if curDBVersion == 0 {
-			if err := dbm.Create(ctx, d.DDL(), d.Version()); err != nil {
-				return errors.Wrap(err, "create db error")
-			}
-		} else {
-			migrationRequired, err := dbm.CheckMigrationRequired(curDBVersion, d.Version())
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			if migrationRequired {
-				return errors.Errorf("db requires migration, current version: %d, wanted version: %d", curDBVersion, d.Version())
-			}
-		}
-
-		return nil
-	}
-
-	if err := setupDB(); err != nil {
+	if err := common.SetupDB(ctx, dbm); err != nil {
 		return nil, errors.Wrap(err, "failed to setup db")
 	}
 
@@ -198,7 +164,7 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	deleteVariableHandler := api.NewDeleteVariableHandler(s.log, s.ah)
 
 	userHandler := api.NewUserHandler(s.log, s.d)
-	usersHandler := api.NewUsersHandler(s.log, s.d)
+	usersHandler := api.NewUsersHandler(s.log, s.d, s.ah)
 	createUserHandler := api.NewCreateUserHandler(s.log, s.ah)
 	updateUserHandler := api.NewUpdateUserHandler(s.log, s.ah)
 	deleteUserHandler := api.NewDeleteUserHandler(s.log, s.ah)
@@ -214,10 +180,11 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	createUserTokenHandler := api.NewCreateUserTokenHandler(s.log, s.ah)
 	deleteUserTokenHandler := api.NewDeleteUserTokenHandler(s.log, s.ah)
 
+	userOrgHandler := api.NewUserOrgHandler(s.log, s.ah)
 	userOrgsHandler := api.NewUserOrgsHandler(s.log, s.ah)
 
 	orgHandler := api.NewOrgHandler(s.log, s.d)
-	orgsHandler := api.NewOrgsHandler(s.log, s.d)
+	orgsHandler := api.NewOrgsHandler(s.log, s.ah)
 	createOrgHandler := api.NewCreateOrgHandler(s.log, s.ah)
 	updateOrgHandler := api.NewUpdateOrgHandler(s.log, s.ah)
 	deleteOrgHandler := api.NewDeleteOrgHandler(s.log, s.ah)
@@ -228,7 +195,7 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	removeOrgMemberHandler := api.NewRemoveOrgMemberHandler(s.log, s.ah)
 
 	remoteSourceHandler := api.NewRemoteSourceHandler(s.log, s.d)
-	remoteSourcesHandler := api.NewRemoteSourcesHandler(s.log, s.d)
+	remoteSourcesHandler := api.NewRemoteSourcesHandler(s.log, s.ah)
 	createRemoteSourceHandler := api.NewCreateRemoteSourceHandler(s.log, s.ah)
 	updateRemoteSourceHandler := api.NewUpdateRemoteSourceHandler(s.log, s.ah)
 	deleteRemoteSourceHandler := api.NewDeleteRemoteSourceHandler(s.log, s.ah)
@@ -239,8 +206,12 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	deleteOrgInvitationHandler := api.NewDeleteOrgInvitationHandler(s.log, s.ah)
 	orgInvitationHandler := api.NewOrgInvitationHandler(s.log, s.ah)
 
+	authHandler := handlers.NewInternalAuthChecker(s.log, s.c.APIToken)
+
 	router := mux.NewRouter()
 	apirouter := router.PathPrefix("/api/v1alpha").Subrouter().UseEncodedPath()
+
+	apirouter.Use(authHandler)
 
 	apirouter.Handle("/projectgroups/{projectgroupref}", projectGroupHandler).Methods("GET")
 	apirouter.Handle("/projectgroups/{projectgroupref}/subgroups", projectGroupSubgroupsHandler).Methods("GET")
@@ -288,6 +259,7 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	apirouter.Handle("/users/{userref}/tokens/{tokenname}", deleteUserTokenHandler).Methods("DELETE")
 
 	apirouter.Handle("/users/{userref}/orgs", userOrgsHandler).Methods("GET")
+	apirouter.Handle("/users/{userref}/orgs/{orgref}", userOrgHandler).Methods("GET")
 
 	apirouter.Handle("/orgs/{orgref}", orgHandler).Methods("GET")
 	apirouter.Handle("/orgs", orgsHandler).Methods("GET")

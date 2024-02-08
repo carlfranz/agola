@@ -25,7 +25,10 @@ import (
 
 	"github.com/sorintlab/errors"
 
+	"agola.io/agola/internal/services/gateway/action"
 	"agola.io/agola/internal/sqlg/lock"
+	"agola.io/agola/internal/sqlg/sql"
+	"agola.io/agola/services/notification/types"
 	rstypes "agola.io/agola/services/runservice/types"
 )
 
@@ -58,7 +61,23 @@ func (n *NotificationService) runEventsHandler(ctx context.Context) error {
 	}
 	defer func() { _ = l.Unlock() }()
 
-	resp, err := n.runserviceClient.GetRunEvents(ctx, "")
+	var afterSequence uint64
+	err := n.d.Do(ctx, func(tx *sql.Tx) error {
+		lastRunEventSequence, err := n.d.GetLastRunEventSequence(tx)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if lastRunEventSequence != nil {
+			afterSequence = lastRunEventSequence.Value
+		}
+
+		return nil
+	})
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	resp, err := n.runserviceClient.GetRunEvents(ctx, afterSequence)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -77,7 +96,7 @@ func (n *NotificationService) runEventsHandler(ctx context.Context) error {
 		}
 		line, err := br.ReadBytes('\n')
 		if err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				return errors.WithStack(err)
 			}
 			if len(line) == 0 {
@@ -97,14 +116,95 @@ func (n *NotificationService) runEventsHandler(ctx context.Context) error {
 				return errors.WithStack(err)
 			}
 
-			// TODO(sgotti)
-			// this is just a basic handling. Improve it to store received events and
-			// their status in the db so we can also do more logic like retrying and handle
-			// multiple kind of notifications (email etc...)
-			if err := n.updateCommitStatus(ctx, ev); err != nil {
-				n.log.Info().Err(err).Msgf("failed to update commit status")
+			var webhookPayload []byte
+			var commitStatus *commitStatus
+
+			// Currently we're handling only events of type runphasechanged.
+			switch ev.RunEventType {
+			case rstypes.RunPhaseChanged:
+				commitStatus, err = n.generateCommitStatus(ctx, ev)
+				if err != nil {
+					n.log.Error().Msgf("failed to generate commit status")
+				}
+				if n.c.WebhookURL != "" {
+					runWebhook := n.generatewebhook(ctx, ev)
+					webhookPayload, err = json.Marshal(runWebhook)
+					if err != nil {
+						n.log.Error().Msgf("failed to unmarshal run webhook")
+					}
+				}
+			default:
+				n.log.Error().Msgf("run event %q is not valid", ev.RunEventType)
 			}
 
+			err = n.d.Do(ctx, func(tx *sql.Tx) error {
+				lastRunEventSequence, err := n.d.GetLastRunEventSequence(tx)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+				if lastRunEventSequence != nil {
+					if ev.Sequence <= lastRunEventSequence.Value {
+						n.log.Error().Msgf("runEvent sequence %d already processed", ev.Sequence)
+						return nil
+					}
+				}
+
+				if commitStatus != nil {
+					cs := types.NewCommitStatus(tx)
+					cs.ProjectID = commitStatus.ProjectID
+					cs.State = commitStatus.State
+					cs.RunCounter = commitStatus.RunCounter
+					cs.CommitSHA = commitStatus.CommitSHA
+					cs.Description = commitStatus.Description
+					cs.Context = commitStatus.Context
+
+					if err := n.d.InsertCommitStatus(tx, cs); err != nil {
+						return errors.WithStack(err)
+					}
+
+					commitStatusDelivery := types.NewCommitStatusDelivery(tx)
+					commitStatusDelivery.CommitStatusID = cs.ID
+					commitStatusDelivery.DeliveryStatus = types.DeliveryStatusNotDelivered
+
+					if err := n.d.InsertCommitStatusDelivery(tx, commitStatusDelivery); err != nil {
+						return errors.WithStack(err)
+					}
+				}
+
+				if webhookPayload != nil {
+					data := ev.Data.(*rstypes.RunEventData)
+
+					wh := types.NewRunWebhook(tx)
+					wh.Payload = webhookPayload
+					wh.ProjectID = data.Annotations[action.AnnotationProjectID]
+
+					if err := n.d.InsertRunWebhook(tx, wh); err != nil {
+						return errors.WithStack(err)
+					}
+
+					runWebhookDelivery := types.NewRunWebhookDelivery(tx)
+					runWebhookDelivery.RunWebhookID = wh.ID
+					runWebhookDelivery.DeliveryStatus = types.DeliveryStatusNotDelivered
+
+					if err := n.d.InsertRunWebhookDelivery(tx, runWebhookDelivery); err != nil {
+						return errors.WithStack(err)
+					}
+				}
+
+				if lastRunEventSequence == nil {
+					lastRunEventSequence = types.NewLastRunEventSequence(tx)
+				}
+				lastRunEventSequence.Value = ev.Sequence
+
+				if err := n.d.InsertOrUpdateLastRunEventSequence(tx, lastRunEventSequence); err != nil {
+					return errors.WithStack(err)
+				}
+
+				return nil
+			})
+			if err != nil {
+				return errors.WithStack(err)
+			}
 		default:
 			return errors.Errorf("wrong data")
 		}

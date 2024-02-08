@@ -19,6 +19,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gotest.tools/assert"
+	"gotest.tools/assert/cmp"
+
+	"agola.io/agola/internal/testutil"
 )
 
 func TestPosixDeleteObject(t *testing.T) {
@@ -27,29 +32,22 @@ func TestPosixDeleteObject(t *testing.T) {
 	dir := t.TempDir()
 
 	ls, err := NewPosix(dir)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	testutil.NilError(t, err)
 
 	for _, obj := range objects {
-		if err := ls.WriteObject(obj, bytes.NewReader([]byte{}), 0, true); err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if err := ls.DeleteObject(obj); err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		err := ls.WriteObject(obj, bytes.NewReader([]byte{}), 0, true)
+		testutil.NilError(t, err)
+
+		err = ls.DeleteObject(obj)
+		testutil.NilError(t, err)
 	}
 
 	// no files and directories should be left
 	bd, err := os.Open(filepath.Join(dir, dataDirName))
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	testutil.NilError(t, err)
+
 	files, err := bd.Readdirnames(0)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(files) > 0 {
-		t.Fatalf("expected 0 files got %d files", len(files))
-	}
+	testutil.NilError(t, err)
+
+	assert.Assert(t, cmp.Len(files, 0), "number of files")
 }

@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	Version = uint(2)
+	Version = uint(3)
 )
 
 const TypesImport = "agola.io/agola/services/configstore/types"
@@ -18,8 +18,8 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 			{Name: "Name", Type: "string"},
 			{Name: "APIURL", Type: "string"},
 			{Name: "SkipVerify", Type: "bool"},
-			{Name: "Type", Type: "types.RemoteSourceType", SQLType: "varchar"},
-			{Name: "AuthType", Type: "types.RemoteSourceAuthType", SQLType: "varchar"},
+			{Name: "Type", Type: "types.RemoteSourceType", BaseType: "string"},
+			{Name: "AuthType", Type: "types.RemoteSourceAuthType", BaseType: "string"},
 			{Name: "Oauth2ClientID", Type: "string"},
 			{Name: "Oauth2ClientSecret", Type: "string"},
 			{Name: "SSHHostKey", Type: "string"},
@@ -65,7 +65,7 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 	{Name: "Organization", Table: "organization",
 		Fields: []sqlg.ObjectField{
 			{Name: "Name", Type: "string"},
-			{Name: "Visibility", Type: "types.Visibility", SQLType: "varchar"},
+			{Name: "Visibility", Type: "types.Visibility", BaseType: "string"},
 			{Name: "CreatorUserID", Type: "string"},
 		},
 	},
@@ -73,7 +73,7 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 		Fields: []sqlg.ObjectField{
 			{Name: "OrganizationID", Type: "string"},
 			{Name: "UserID", Type: "string"},
-			{Name: "MemberRole", Type: "types.MemberRole", SQLType: "varchar"},
+			{Name: "MemberRole", Type: "types.MemberRole", BaseType: "string"},
 		},
 		Constraints: []string{
 			"foreign key (organization_id) references organization(id)",
@@ -83,19 +83,19 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 	{Name: "ProjectGroup", Table: "projectgroup",
 		Fields: []sqlg.ObjectField{
 			{Name: "Name", Type: "string"},
-			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", SQLType: "varchar"},
+			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", BaseType: "string"},
 			{Name: "Parent.ID", ColName: "parent_id", Type: "string"},
-			{Name: "Visibility", Type: "types.Visibility", SQLType: "varchar"},
+			{Name: "Visibility", Type: "types.Visibility", BaseType: "string"},
 		},
 	},
 	{Name: "Project", Table: "project",
 		Fields: []sqlg.ObjectField{
 			{Name: "Name", Type: "string"},
-			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", SQLType: "varchar"},
+			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", BaseType: "string"},
 			{Name: "Parent.ID", ColName: "parent_id", Type: "string"},
 			{Name: "Secret", Type: "string"},
-			{Name: "Visibility", Type: "types.Visibility", SQLType: "varchar"},
-			{Name: "RemoteRepositoryConfigType", Type: "types.RemoteRepositoryConfigType", SQLType: "varchar"},
+			{Name: "Visibility", Type: "types.Visibility", BaseType: "string"},
+			{Name: "RemoteRepositoryConfigType", Type: "types.RemoteRepositoryConfigType", BaseType: "string"},
 			{Name: "RemoteSourceID", Type: "string"},
 			{Name: "LinkedAccountID", Type: "string"},
 			{Name: "RepositoryID", Type: "string"},
@@ -105,14 +105,15 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 			{Name: "WebhookSecret", Type: "string"},
 			{Name: "PassVarsToForkedPR", Type: "bool"},
 			{Name: "DefaultBranch", Type: "string"},
+			{Name: "MembersCanPerformRunActions", Type: "bool"},
 		},
 	},
 	{Name: "Secret", Table: "secret",
 		Fields: []sqlg.ObjectField{
 			{Name: "Name", Type: "string"},
-			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", SQLType: "varchar"},
+			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", BaseType: "string"},
 			{Name: "Parent.ID", ColName: "parent_id", Type: "string"},
-			{Name: "Type", Type: "types.SecretType", SQLType: "varchar"},
+			{Name: "Type", Type: "types.SecretType", BaseType: "string"},
 			{Name: "Data", Type: "map[string]string", JSON: true},
 			{Name: "SecretProviderID", Type: "string"},
 			{Name: "Path", Type: "string"},
@@ -121,7 +122,7 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 	{Name: "Variable", Table: "variable",
 		Fields: []sqlg.ObjectField{
 			{Name: "Name", Type: "string"},
-			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", SQLType: "varchar"},
+			{Name: "Parent.Kind", ColName: "parent_kind", Type: "types.ObjectKind", BaseType: "string"},
 			{Name: "Parent.ID", ColName: "parent_id", Type: "string"},
 			{Name: "Values", ColName: "variable_values", Type: "[]types.VariableValue", JSON: true},
 		},
@@ -130,7 +131,7 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 		Fields: []sqlg.ObjectField{
 			{Name: "UserID", Type: "string"},
 			{Name: "OrganizationID", Type: "string"},
-			{Name: "Role", Type: "types.MemberRole", SQLType: "varchar"},
+			{Name: "Role", Type: "types.MemberRole", BaseType: "string"},
 		},
 		Constraints: []string{
 			"foreign key (user_id) references user_t(id)",

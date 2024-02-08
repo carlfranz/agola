@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	Version = uint(1)
+	Version = uint(2)
 )
 
 const TypesImport = "agola.io/agola/services/runservice/types"
@@ -39,8 +39,8 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 			{Name: "Counter", Type: "uint64"},
 			{Name: "Group", ColName: "run_group", Type: "string"},
 			{Name: "Annotations", Type: "map[string]string", JSON: true},
-			{Name: "Phase", Type: "types.RunPhase", SQLType: "varchar"},
-			{Name: "Result", Type: "types.RunResult", SQLType: "varchar"},
+			{Name: "Phase", Type: "types.RunPhase", BaseType: "string"},
+			{Name: "Result", Type: "types.RunResult", BaseType: "string"},
 			{Name: "Stop", Type: "bool"},
 			{Name: "Tasks", Type: "map[string]*RunTask", JSON: true},
 			{Name: "EnqueueTime", Type: "time.Time", Nullable: true},
@@ -67,9 +67,12 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 	{Name: "RunEvent", Table: "runevent",
 		Fields: []sqlg.ObjectField{
 			{Name: "Sequence", Type: "uint64", Sequence: true},
+			{Name: "RunEventType", Type: "types.RunEventType", BaseType: "string"},
 			{Name: "RunID", Type: "string"},
-			{Name: "Phase", Type: "types.RunPhase", SQLType: "varchar"},
-			{Name: "Result", Type: "types.RunResult", SQLType: "varchar"},
+			{Name: "Phase", Type: "types.RunPhase", BaseType: "string"},
+			{Name: "Result", Type: "types.RunResult", BaseType: "string"},
+			{Name: "Data", Type: "any", JSON: true},
+			{Name: "DataVersion", Type: "uint64"},
 		},
 	},
 	{Name: "Executor", Table: "executor",
@@ -92,7 +95,7 @@ var ObjectsInfo = []sqlg.ObjectInfo{
 			{Name: "RunID", Type: "string"},
 			{Name: "RunTaskID", Type: "string"},
 			{Name: "Stop", Type: "bool"},
-			{Name: "Phase", Type: "types.ExecutorTaskPhase", SQLType: "varchar"},
+			{Name: "Phase", Type: "types.ExecutorTaskPhase", BaseType: "string"},
 			{Name: "Timedout", Type: "bool"},
 			{Name: "FailError", Type: "string"},
 			{Name: "StartTime", Type: "time.Time", Nullable: true},

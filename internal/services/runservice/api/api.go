@@ -488,6 +488,18 @@ func NewRunByGroupHandler(log zerolog.Logger, d *db.DB, ah *action.ActionHandler
 }
 
 func (h *RunByGroupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(w, r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *RunByGroupHandler) do(w http.ResponseWriter, r *http.Request) (*rsapitypes.RunResponse, error) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 
@@ -496,22 +508,20 @@ func (h *RunByGroupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	group, err := url.PathUnescape(vars["group"])
 	if err != nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Errorf("group is empty")))
-		return
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("group is empty"))
 	}
 
 	runCounterStr := vars["runcounter"]
 
 	var runCounter uint64
 	if runCounterStr == "" {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Errorf("runcounter is empty")))
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("runcounter is empty"))
 	}
 	if runCounterStr != "" {
 		var err error
 		runCounter, err = strconv.ParseUint(runCounterStr, 10, 64)
 		if err != nil {
-			util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse runcounter")))
-			return
+			return nil, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse runcounter"))
 		}
 	}
 
@@ -539,23 +549,19 @@ func (h *RunByGroupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return errors.WithStack(err)
 	})
 	if err != nil {
-		h.log.Err(err).Send()
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, errors.WithStack(err)
 	}
 	if run == nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrNotExist, errors.Errorf("run for group %q with counter %d doesn't exist", group, runCounter)))
+		return nil, util.NewAPIError(util.ErrNotExist, errors.Errorf("run for group %q with counter %d doesn't exist", group, runCounter))
 	}
 
 	if rc == nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrNotExist, errors.Errorf("run config for run with id %q doesn't exist", run.ID)))
-		return
+		return nil, util.NewAPIError(util.ErrNotExist, errors.Errorf("run config for run with id %q doesn't exist", run.ID))
 	}
 
 	cgts, err := types.MarshalChangeGroupsUpdateToken(cgt)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, errors.WithStack(err)
 	}
 
 	res := &rsapitypes.RunResponse{
@@ -564,10 +570,7 @@ func (h *RunByGroupHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ChangeGroupsUpdateToken: cgts,
 	}
 
-	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
-		h.log.Err(err).Send()
-	}
-
+	return res, nil
 }
 
 const (
@@ -949,23 +952,23 @@ func (h *RunEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
 	// TODO(sgotti) handle additional events filtering (by type, etc...)
-	var startRunEventSequence uint64
-	startRunEventSequenceStr := q.Get("startsequence")
-	if startRunEventSequenceStr != "" {
+	var afterRunEventSequence uint64
+	afterRunEventSequenceStr := q.Get("afterSequence")
+	if afterRunEventSequenceStr != "" {
 		var err error
-		startRunEventSequence, err = strconv.ParseUint(startRunEventSequenceStr, 10, 64)
+		afterRunEventSequence, err = strconv.ParseUint(afterRunEventSequenceStr, 10, 64)
 		if err != nil {
-			util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse startsequence")))
+			util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse afterSequence")))
 			return
 		}
 	}
 
-	if err := h.sendRunEvents(ctx, startRunEventSequence, w); err != nil {
+	if err := h.sendRunEvents(ctx, afterRunEventSequence, w); err != nil {
 		h.log.Err(err).Send()
 	}
 }
 
-func (h *RunEventsHandler) sendRunEvents(ctx context.Context, startRunEventSequence uint64, w http.ResponseWriter) error {
+func (h *RunEventsHandler) sendRunEvents(ctx context.Context, afterRunEventSequence uint64, w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -977,9 +980,9 @@ func (h *RunEventsHandler) sendRunEvents(ctx context.Context, startRunEventSeque
 
 	// TODO(sgotti) use a notify system instead of polling the database
 
-	curEventSequence := startRunEventSequence
+	curEventSequence := afterRunEventSequence
 
-	if startRunEventSequence == 0 {
+	if afterRunEventSequence == 0 {
 		err := h.d.Do(ctx, func(tx *sql.Tx) error {
 			// start from last event
 			runEvent, err := h.d.GetLastRunEvent(tx)

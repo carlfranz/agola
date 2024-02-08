@@ -3,13 +3,14 @@ local go_runtime(version, arch) = {
   arch: arch,
   containers: [
     {
-      image: 'golang:' + version + '-buster',
+      image: 'golang:' + version + '-bookworm',
     },
     {
-      image: 'postgres',
+      image: 'postgres:15',
       environment: {
         POSTGRES_PASSWORD: 'password',
       },
+      entrypoint: 'docker-entrypoint.sh -c max_connections=300'
     },
   ],
 };
@@ -38,7 +39,7 @@ local task_build_go(version, arch) = {
     { type: 'run', command: 'make' },
     { type: 'save_cache', key: 'cache-sum-{{ md5sum "go.sum" }}', contents: [{ source_dir: '/go/pkg/mod/cache' }] },
     { type: 'save_cache', key: 'cache-date-{{ year }}-{{ month }}-{{ day }}', contents: [{ source_dir: '/go/pkg/mod/cache' }] },
-    { type: 'run', name: 'install golangci-lint', command: 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.51.2' },
+    { type: 'run', name: 'install golangci-lint', command: 'curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.54.2' },
     { type: 'run', command: 'golangci-lint run --deadline 5m' },
     { type: 'run', name: 'build docker/k8s drivers tests binary', command: 'CGO_ENABLED=0 go test -c ./internal/services/executor/driver -o ./bin/docker-tests' },
     { type: 'run', name: 'build integration tests binary', command: 'go test -tags "sqlite_unlock_notify" -c ./tests -o ./bin/integration-tests' },
@@ -48,7 +49,7 @@ local task_build_go(version, arch) = {
         SKIP_DOCKER_TESTS: "1",
         SKIP_K8S_TESTS: "1",
       },
-      command: 'go test -tags "sqlite_unlock_notify" -v -count 1 -parallel 5 $(go list ./... | grep -v /tests)' },
+      command: 'go test -tags "sqlite_unlock_notify" -v -count 1 -parallel 5 $(go list ./... | grep -v agola.io/agola/tests)' },
     { type: 'run', name: 'run tests (postgres)',
       environment: {
         DB_TYPE: "postgres",
@@ -56,7 +57,7 @@ local task_build_go(version, arch) = {
         SKIP_DOCKER_TESTS: "1",
         SKIP_K8S_TESTS: "1",
       },
-      command: 'go test -tags "sqlite_unlock_notify" -v -count 1 -parallel 5 $(go list ./... | grep -v /tests)' },
+      command: 'go test -tags "sqlite_unlock_notify" -v -count 1 -parallel 5 $(go list ./... | grep -v agola.io/agola/tests)' },
     { type: 'run', name: 'fetch gitea binary for integration tests', command: 'curl -L https://github.com/go-gitea/gitea/releases/download/v1.15.11/gitea-1.15.11-linux-amd64 -o ./bin/gitea && chmod +x ./bin/gitea' },
     { type: 'save_to_workspace', contents: [{ source_dir: './bin', dest_dir: '/bin/', paths: ['*'] }] },
   ],
@@ -127,7 +128,7 @@ local task_build_push_images(name, target, push) =
         [
           task_build_go(version, arch),
         ]
-        for version in ['1.19', '1.20']
+        for version in ['1.20', '1.21']
         for arch in ['amd64' /*, 'arm64' */]
       ]) + [
         {
@@ -138,7 +139,7 @@ local task_build_push_images(name, target, push) =
             { type: 'run', command: 'SKIP_K8S_TESTS=1 AGOLA_TOOLBOX_PATH="./bin" ./bin/docker-tests -test.parallel 5 -test.v' },
           ],
           depends: [
-            'build go 1.20 amd64',
+            'build go 1.21 amd64',
           ],
         },
         {
@@ -161,7 +162,7 @@ local task_build_push_images(name, target, push) =
             { type: 'run', name: 'integration tests', command: 'AGOLA_BIN_DIR="./bin" GITEA_PATH=${PWD}/bin/gitea DOCKER_BRIDGE_ADDRESS="172.18.0.1" ./bin/integration-tests -test.parallel 3 -test.v' },
           ],
           depends: [
-            'build go 1.20 amd64',
+            'build go 1.21 amd64',
           ],
         },
         {

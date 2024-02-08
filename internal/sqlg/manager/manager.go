@@ -37,6 +37,7 @@ var (
 
 type DB interface {
 	DBType() sql.Type
+	DB() *sql.DB
 	Version() uint
 
 	Do(ctx context.Context, f func(tx *sql.Tx) error) error
@@ -52,7 +53,7 @@ type DB interface {
 	FetchObjects(tx *sql.Tx, kind string, q sq.Builder) ([]sqlg.Object, error)
 	ObjectToExportJSON(obj sqlg.Object, e *json.Encoder) error
 
-	Sequences() []string
+	Sequences() []sqlg.Sequence
 	GetSequence(tx *sql.Tx, sequenceName string) (uint64, error)
 	PopulateSequences(tx *sql.Tx) error
 }
@@ -117,6 +118,14 @@ func (m *DBManager) Unlock() error {
 	}
 
 	return errors.WithStack(m.lock.Unlock())
+}
+
+func (m *DBManager) WantedVersion() uint {
+	return m.d.Version()
+}
+
+func (m *DBManager) DDL() []string {
+	return m.d.DDL()
 }
 
 func (m *DBManager) GetVersion(ctx context.Context) (uint, error) {

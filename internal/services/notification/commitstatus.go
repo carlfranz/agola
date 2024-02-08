@@ -19,104 +19,90 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/sorintlab/errors"
 
-	gitsource "agola.io/agola/internal/gitsources"
 	"agola.io/agola/internal/services/common"
 	"agola.io/agola/internal/services/gateway/action"
-	cstypes "agola.io/agola/services/configstore/types"
+	"agola.io/agola/internal/sqlg/lock"
+	"agola.io/agola/internal/sqlg/sql"
+	"agola.io/agola/services/notification/types"
 	rstypes "agola.io/agola/services/runservice/types"
 )
 
-func (n *NotificationService) updateCommitStatus(ctx context.Context, ev *rstypes.RunEvent) error {
-	var commitStatus gitsource.CommitStatus
+const (
+	commitStatusesCleanerLockKey = "commitStatusesCleaner"
+
+	maxCommitStatusesQueryLimit = 40
+
+	commitStatusesCleanerInterval = 1 * 24 * time.Hour
+)
+
+type commitStatus struct {
+	ProjectID   string
+	CommitSHA   string
+	State       types.CommitState
+	RunCounter  uint64
+	Description string
+	Context     string
+}
+
+func (n *NotificationService) generateCommitStatus(ctx context.Context, ev *rstypes.RunEvent) (*commitStatus, error) {
+	var state types.CommitState
 	if ev.Phase == rstypes.RunPhaseSetupError {
-		commitStatus = gitsource.CommitStatusError
+		state = types.CommitStateError
 	}
 	if ev.Phase == rstypes.RunPhaseCancelled {
-		commitStatus = gitsource.CommitStatusError
+		state = types.CommitStateError
 	}
 	if ev.Phase == rstypes.RunPhaseRunning && ev.Result == rstypes.RunResultUnknown {
-		commitStatus = gitsource.CommitStatusPending
+		state = types.CommitStatePending
 	}
 	if ev.Phase == rstypes.RunPhaseFinished && ev.Result != rstypes.RunResultUnknown {
 		switch ev.Result {
 		case rstypes.RunResultSuccess:
-			commitStatus = gitsource.CommitStatusSuccess
+			state = types.CommitStateSuccess
 		case rstypes.RunResultStopped:
 			fallthrough
 		case rstypes.RunResultFailed:
-			commitStatus = gitsource.CommitStatusFailed
+			state = types.CommitStateFailed
 		}
 	}
 
-	if commitStatus == "" {
-		return nil
+	if state == "" {
+		return nil, nil
 	}
 
 	run, _, err := n.runserviceClient.GetRun(ctx, ev.RunID, nil)
 	if err != nil {
-		return errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
 	groupType, groupID, err := common.GroupTypeIDFromRunGroup(run.RunConfig.Group)
 	if err != nil {
-		return errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
 
 	// ignore user direct runs
 	if groupType == common.GroupTypeUser {
-		return nil
+		return nil, nil
 	}
 
 	project, _, err := n.configstoreClient.GetProject(ctx, groupID)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get project %s", groupID)
+		return nil, errors.Wrapf(err, "failed to get project %s", groupID)
 	}
 
-	user, _, err := n.configstoreClient.GetUserByLinkedAccount(ctx, project.LinkedAccountID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get user by linked account %q", project.LinkedAccountID)
-	}
-
-	linkedAccounts, _, err := n.configstoreClient.GetUserLinkedAccounts(ctx, user.ID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get user %q linked accounts", user.Name)
-	}
-
-	var la *cstypes.LinkedAccount
-	for _, v := range linkedAccounts {
-		if v.ID == project.LinkedAccountID {
-			la = v
-			break
-		}
-	}
-	if la == nil {
-		return errors.Errorf("linked account %q for user %q doesn't exist", project.LinkedAccountID, user.Name)
-	}
-	rs, _, err := n.configstoreClient.GetRemoteSource(ctx, la.RemoteSourceID)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get remote source %q", la.RemoteSourceID)
-	}
-
-	// TODO(sgotti) handle refreshing oauth2 tokens
-	gitSource, err := common.GetGitSource(rs, la)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create gitea client")
-	}
-
-	targetURL, err := webRunURL(n.c.WebExposedURL, project.ID, run.Run.Counter)
-	if err != nil {
-		return errors.Wrapf(err, "failed to generate commit status target url")
-	}
-	description := statusDescription(commitStatus)
 	context := fmt.Sprintf("%s/%s/%s", n.gc.ID, project.Name, run.RunConfig.Name)
 
-	if err := gitSource.CreateCommitStatus(project.RepositoryPath, run.Run.Annotations[action.AnnotationCommitSHA], commitStatus, targetURL, description, context); err != nil {
-		return errors.WithStack(err)
-	}
-
-	return nil
+	return &commitStatus{
+		ProjectID:   project.ID,
+		State:       state,
+		CommitSHA:   run.Run.Annotations[action.AnnotationCommitSHA],
+		RunCounter:  run.Run.Counter,
+		Description: statusDescription(state),
+		Context:     context,
+	}, nil
 }
 
 func webRunURL(webExposedURL, projectID string, runNumber uint64) (string, error) {
@@ -133,17 +119,87 @@ func webRunURL(webExposedURL, projectID string, runNumber uint64) (string, error
 	return u.String(), nil
 }
 
-func statusDescription(commitStatus gitsource.CommitStatus) string {
-	switch commitStatus {
-	case gitsource.CommitStatusPending:
+func statusDescription(state types.CommitState) string {
+	switch state {
+	case types.CommitStatePending:
 		return "The run is pending"
-	case gitsource.CommitStatusSuccess:
+	case types.CommitStateSuccess:
 		return "The run finished successfully"
-	case gitsource.CommitStatusError:
+	case types.CommitStateError:
 		return "The run encountered an error"
-	case gitsource.CommitStatusFailed:
+	case types.CommitStateFailed:
 		return "The run failed"
 	default:
 		return ""
 	}
+}
+
+func (n *NotificationService) commitStatusesCleanerLoop(ctx context.Context, commitStatusExpireInterval time.Duration) {
+	n.log.Debug().Msgf("commitStatusesCleanerLoop")
+
+	for {
+		if err := n.commitStatusesCleaner(ctx, commitStatusExpireInterval); err != nil {
+			n.log.Warn().Err(err).Msgf("commitStatusesCleaner error")
+		}
+
+		sleepCh := time.NewTimer(commitStatusesCleanerInterval).C
+		select {
+		case <-ctx.Done():
+			return
+		case <-sleepCh:
+		}
+	}
+}
+
+func (n *NotificationService) commitStatusesCleaner(ctx context.Context, commitStatusExpireInterval time.Duration) error {
+	l := n.lf.NewLock(commitStatusesCleanerLockKey)
+	if err := l.TryLock(ctx); err != nil {
+		if errors.Is(err, lock.ErrLocked) {
+			return nil
+		}
+		return errors.WithStack(err)
+	}
+	defer func() { _ = l.Unlock() }()
+
+	for {
+		var commitStatuses []*types.CommitStatus
+		var afterCommitStatusID string
+
+		err := n.d.Do(ctx, func(tx *sql.Tx) error {
+			var err error
+			commitStatuses, err = n.d.GetCommitStatusesAfterCommitStatusID(tx, afterCommitStatusID, maxCommitStatusesQueryLimit)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+
+			for _, c := range commitStatuses {
+				if time.Since(c.CreationTime) < commitStatusExpireInterval {
+					continue
+				}
+
+				err = n.d.DeleteCommitStatusDeliveriesByCommitStatusID(tx, c.ID)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+
+				err = n.d.DeleteCommitStatus(tx, c.ID)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+			}
+
+			return nil
+		})
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		if len(commitStatuses) < maxCommitStatusesQueryLimit {
+			break
+		}
+
+		afterCommitStatusID = commitStatuses[len(commitStatuses)-1].ID
+	}
+
+	return nil
 }

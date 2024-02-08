@@ -1,4 +1,4 @@
-package sql
+package sql_test
 
 import (
 	"context"
@@ -11,25 +11,24 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/sorintlab/errors"
 	"gotest.tools/assert"
+	"gotest.tools/assert/cmp"
+
+	"agola.io/agola/internal/sqlg/sql"
+	"agola.io/agola/internal/testutil"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
-func SetupDB(t *testing.T, ctx context.Context, dir string) *DB {
-	var dbType Type
+func SetupDB(t *testing.T, ctx context.Context, dir string) *sql.DB {
+	var dbType sql.Type
 	switch os.Getenv("DB_TYPE") {
 	case "":
-		dbType = Sqlite3
+		dbType = sql.Sqlite3
 	case "sqlite3":
-		dbType = Sqlite3
+		dbType = sql.Sqlite3
 	case "postgres":
-		dbType = Postgres
+		dbType = sql.Postgres
 	default:
 		t.Fatalf("unknown db type")
 	}
@@ -37,30 +36,30 @@ func SetupDB(t *testing.T, ctx context.Context, dir string) *DB {
 	pgConnString := os.Getenv("PG_CONNSTRING")
 
 	var err error
-	var sdb *DB
+	var sdb *sql.DB
 
 	switch dbType {
-	case Sqlite3:
+	case sql.Sqlite3:
 		dbName := "testdb" + strconv.FormatUint(uint64(rand.Uint32()), 10)
 		dbPath := filepath.Join(dir, dbName)
 
-		sdb, err = NewDB("sqlite3", dbPath)
-		assert.NilError(t, err)
+		sdb, err = sql.NewDB("sqlite3", dbPath)
+		testutil.NilError(t, err)
 
-	case Postgres:
+	case sql.Postgres:
 		dbName := "testdb" + strconv.FormatUint(uint64(rand.Uint32()), 10)
 
 		pgdb, err := stdsql.Open("postgres", fmt.Sprintf(pgConnString, "postgres"))
-		assert.NilError(t, err)
+		testutil.NilError(t, err)
 
 		_, err = pgdb.Exec(fmt.Sprintf("drop database if exists %s", dbName))
-		assert.NilError(t, err)
+		testutil.NilError(t, err)
 
 		_, err = pgdb.Exec(fmt.Sprintf("create database %s", dbName))
-		assert.NilError(t, err)
+		testutil.NilError(t, err)
 
-		sdb, err = NewDB("postgres", fmt.Sprintf(pgConnString, dbName))
-		assert.NilError(t, err)
+		sdb, err = sql.NewDB("postgres", fmt.Sprintf(pgConnString, dbName))
+		testutil.NilError(t, err)
 
 	default:
 		t.Fatalf("unknown db type")
@@ -83,12 +82,12 @@ func TestPGSerializationError(t *testing.T) {
 
 	sdb := SetupDB(t, ctx, tmpDir)
 
-	_, err := sdb.db.Exec("create table if not exists table01 (id varchar, data varchar, PRIMARY KEY (id))")
-	assert.NilError(t, err)
+	_, err := sdb.ExecContext(ctx, "create table if not exists table01 (id varchar, data varchar, PRIMARY KEY (id))")
+	testutil.NilError(t, err)
 
 	txErrors := []error{}
 
-	fetchEntriesFn := func(tx *Tx) ([]string, error) {
+	fetchEntriesFn := func(tx *sql.Tx) ([]string, error) {
 		rows, err := tx.Query("select * from table01")
 		if err != nil {
 			return nil, errors.WithStack(err)
@@ -113,7 +112,7 @@ func TestPGSerializationError(t *testing.T) {
 
 	// start a transaction, wait on channel to start, get all entries and add an entry only if there're no entries.
 	insertEntryFn := func(txCount *uint32, ch chan struct{}) error {
-		return sdb.Do(ctx, func(tx *Tx) error {
+		err := sdb.Do(ctx, func(tx *sql.Tx) error {
 			atomic.AddUint32(txCount, 1)
 
 			<-ch
@@ -132,6 +131,7 @@ func TestPGSerializationError(t *testing.T) {
 
 			return nil
 		})
+		return errors.WithStack(err)
 	}
 
 	// start two goroutines executing the transaction. One should fail at least
@@ -155,18 +155,18 @@ func TestPGSerializationError(t *testing.T) {
 	close(ch)
 
 	wg.Wait()
-	assert.Assert(t, len(txErrors) == 0)
+	assert.Assert(t, cmp.Len(txErrors, 0))
 
 	var entries []string
-	err = sdb.Do(ctx, func(tx *Tx) error {
+	err = sdb.Do(ctx, func(tx *sql.Tx) error {
 		var err error
 		entries, err = fetchEntriesFn(tx)
 		return errors.WithStack(err)
 	})
-	assert.NilError(t, err)
+	testutil.NilError(t, err)
 
-	assert.Assert(t, len(entries) == 1, "entries = %d", len(entries))
+	assert.Assert(t, cmp.Len(entries, 1))
 
 	// there must be at least one retried tx, so at least n + 1 transactions
-	assert.Assert(t, txCount >= uint32(n), "txCount = %d", txCount)
+	assert.Assert(t, txCount >= uint32(n))
 }

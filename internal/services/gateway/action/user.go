@@ -33,6 +33,7 @@ import (
 	"agola.io/agola/internal/services/types"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
+	"agola.io/agola/services/configstore/client"
 	cstypes "agola.io/agola/services/configstore/types"
 )
 
@@ -88,32 +89,107 @@ func (h *ActionHandler) GetUser(ctx context.Context, userRef string) (*cstypes.U
 	return user, nil
 }
 
-func (h *ActionHandler) GetUserOrgs(ctx context.Context, userRef string) ([]*csapitypes.UserOrgsResponse, error) {
+type GetUserOrgsRequest struct {
+	UserRef string
+
+	Cursor string
+
+	Limit         int
+	SortDirection SortDirection
+}
+
+type GetUserOrgsResponse struct {
+	Orgs   []*csapitypes.UserOrgResponse
+	Cursor string
+}
+
+func (h *ActionHandler) GetUserOrgs(ctx context.Context, req *GetUserOrgsRequest) (*GetUserOrgsResponse, error) {
 	if !common.IsUserLogged(ctx) {
 		return nil, errors.Errorf("user not logged in")
 	}
 
-	orgs, _, err := h.configstoreClient.GetUserOrgs(ctx, userRef)
+	inCursor := &StartCursor{}
+	sortDirection := req.SortDirection
+	if req.Cursor != "" {
+		if err := UnmarshalCursor(req.Cursor, inCursor); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		sortDirection = inCursor.SortDirection
+	}
+	if sortDirection == "" {
+		sortDirection = SortDirectionAsc
+	}
+
+	orgs, resp, err := h.configstoreClient.GetUserOrgs(ctx, req.UserRef, &client.GetUserOrgsOptions{ListOptions: &client.ListOptions{Limit: req.Limit, SortDirection: cstypes.SortDirection(sortDirection)}, StartOrgName: inCursor.Start})
 	if err != nil {
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
-	return orgs, nil
+
+	var outCursor string
+	if resp.HasMore && len(orgs) > 0 {
+		lastOrgName := orgs[len(orgs)-1].Organization.Name
+		outCursor, err = MarshalCursor(&StartCursor{
+			Start:         lastOrgName,
+			SortDirection: sortDirection,
+		})
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+	}
+
+	res := &GetUserOrgsResponse{
+		Orgs:   orgs,
+		Cursor: outCursor,
+	}
+
+	return res, nil
 }
 
 type GetUsersRequest struct {
-	Start string
-	Limit int
-	Asc   bool
+	Cursor string
+
+	Limit         int
+	SortDirection SortDirection
 }
 
-func (h *ActionHandler) GetUsers(ctx context.Context, req *GetUsersRequest) ([]*PrivateUserResponse, error) {
+type GetUsersResponse struct {
+	Users []*PrivateUserResponse
+
+	Cursor string
+}
+
+func (h *ActionHandler) GetUsers(ctx context.Context, req *GetUsersRequest) (*GetUsersResponse, error) {
 	if !common.IsUserAdmin(ctx) {
 		return nil, util.NewAPIError(util.ErrUnauthorized, errors.Errorf("user not admin"))
 	}
 
-	csusers, _, err := h.configstoreClient.GetUsers(ctx, req.Start, req.Limit, req.Asc)
+	inCursor := &StartCursor{}
+	sortDirection := req.SortDirection
+	if req.Cursor != "" {
+		if err := UnmarshalCursor(req.Cursor, inCursor); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		sortDirection = inCursor.SortDirection
+	}
+	if sortDirection == "" {
+		sortDirection = SortDirectionAsc
+	}
+
+	csusers, resp, err := h.configstoreClient.GetUsers(ctx, &client.GetUsersOptions{ListOptions: &client.ListOptions{Limit: req.Limit, SortDirection: cstypes.SortDirection(sortDirection)}, StartUserName: inCursor.Start})
 	if err != nil {
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
+	}
+
+	var outCursor string
+	if resp.HasMore && len(csusers) > 0 {
+		lastUserName := csusers[len(csusers)-1].Name
+		outCursor, err = MarshalCursor(&StartCursor{
+			Start:         lastUserName,
+			SortDirection: sortDirection,
+		})
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
 	}
 
 	users := make([]*PrivateUserResponse, len(csusers))
@@ -131,7 +207,12 @@ func (h *ActionHandler) GetUsers(ctx context.Context, req *GetUsersRequest) ([]*
 		users[i] = &PrivateUserResponse{User: user, Tokens: tokens, LinkedAccounts: linkedAccounts}
 	}
 
-	return users, nil
+	res := &GetUsersResponse{
+		Users:  users,
+		Cursor: outCursor,
+	}
+
+	return res, nil
 }
 
 type CreateUserRequest struct {

@@ -24,7 +24,8 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/gofrs/uuid"
-	"github.com/google/go-cmp/cmp"
+	"gotest.tools/assert"
+	"gotest.tools/assert/cmp"
 
 	"agola.io/agola/internal/testutil"
 )
@@ -34,24 +35,18 @@ func TestDockerPod(t *testing.T) {
 		t.Skip("skipping since env var SKIP_DOCKER_TESTS is 1")
 	}
 	toolboxPath := os.Getenv("AGOLA_TOOLBOX_PATH")
-	if toolboxPath == "" {
-		t.Fatalf("env var AGOLA_TOOLBOX_PATH is undefined")
-	}
+	assert.Assert(t, toolboxPath != "", "env var AGOLA_TOOLBOX_PATH is undefined")
 
 	log := testutil.NewLogger(t)
 
 	initImage := "busybox:stable"
 
 	d, err := NewDockerDriver(log, "executorid01", toolboxPath, initImage, nil)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	testutil.NilError(t, err)
 
 	ctx := context.Background()
-
-	if err := d.Setup(ctx); err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	err = d.Setup(ctx)
+	testutil.NilError(t, err)
 
 	t.Run("create a pod with one container", func(t *testing.T) {
 		pod, err := d.NewPod(ctx, &PodConfig{
@@ -65,9 +60,8 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 	})
 
@@ -83,25 +77,19 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		ce, err := pod.Exec(ctx, &ExecConfig{
 			Cmd: []string{"ls"},
 		})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		code, err := ce.Wait(ctx)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if code != 0 {
-			t.Fatalf("unexpected exit code: %d", code)
-		}
+		testutil.NilError(t, err)
+
+		assert.Equal(t, code, 0)
 	})
 
 	t.Run("test pod environment", func(t *testing.T) {
@@ -122,9 +110,8 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		var buf bytes.Buffer
@@ -133,31 +120,20 @@ func TestDockerPod(t *testing.T) {
 			Stdout: &buf,
 			Stderr: &buf,
 		})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		code, err := ce.Wait(ctx)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if code != 0 {
-			t.Fatalf("unexpected exit code: %d", code)
-		}
+		testutil.NilError(t, err)
+
+		assert.Equal(t, code, 0)
 
 		curEnv, err := testutil.ParseEnvs(bytes.NewReader(buf.Bytes()))
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		for n, e := range env {
-			if ce, ok := curEnv[n]; !ok {
-				t.Fatalf("missing env var %s", n)
-			} else {
-				if ce != e {
-					t.Fatalf("different env var %s value, want: %q, got %q", n, e, ce)
-				}
-			}
+			ce, ok := curEnv[n]
+			assert.Assert(t, ok, "missing env var %s", n)
+			assert.Equal(t, ce, e, "different env var %s value, want: %q, got %q", n, e, ce)
 		}
 	})
 
@@ -176,9 +152,8 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 	})
 
@@ -197,9 +172,8 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		// wait for nginx up
@@ -208,17 +182,12 @@ func TestDockerPod(t *testing.T) {
 		ce, err := pod.Exec(ctx, &ExecConfig{
 			Cmd: []string{"nc", "-z", "localhost", "80"},
 		})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		code, err := ce.Wait(ctx)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if code != 0 {
-			t.Fatalf("unexpected exit code: %d", code)
-		}
+		testutil.NilError(t, err)
+
+		assert.Equal(t, code, 0)
 	})
 
 	t.Run("test get pods single container", func(t *testing.T) {
@@ -233,15 +202,12 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		pods, err := d.GetPods(ctx, true)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		ok := false
 		for _, p := range pods {
@@ -250,12 +216,8 @@ func TestDockerPod(t *testing.T) {
 				ip := pod.(*DockerPod)
 				dp := p.(*DockerPod)
 				for i, c := range dp.containers {
-					if c.ID != ip.containers[i].ID {
-						t.Fatalf("different container id, want: %q, got: %q", c.ID, ip.containers[i].ID)
-					}
-					if diff := cmp.Diff(ip.containers[i], c); diff != "" {
-						t.Error(diff)
-					}
+					assert.Equal(t, c.ID, ip.containers[i].ID)
+					assert.DeepEqual(t, ip.containers[i], c)
 				}
 			}
 		}
@@ -279,15 +241,12 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		pods, err := d.GetPods(ctx, true)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		ok := false
 		for _, p := range pods {
@@ -296,12 +255,8 @@ func TestDockerPod(t *testing.T) {
 				ip := pod.(*DockerPod)
 				dp := p.(*DockerPod)
 				for i, c := range dp.containers {
-					if c.ID != ip.containers[i].ID {
-						t.Fatalf("different container id, want: %q, got: %q", c.ID, ip.containers[i].ID)
-					}
-					if diff := cmp.Diff(ip.containers[i], c); diff != "" {
-						t.Error(diff)
-					}
+					assert.Equal(t, c.ID, ip.containers[i].ID)
+					assert.DeepEqual(t, ip.containers[i], c)
 				}
 			}
 		}
@@ -325,21 +280,17 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		// delete the first container
 		dp := pod.(*DockerPod)
-		if err := dp.client.ContainerRemove(ctx, dp.containers[0].ID, types.ContainerRemoveOptions{Force: true}); err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		err = dp.client.ContainerRemove(ctx, dp.containers[0].ID, types.ContainerRemoveOptions{Force: true})
+		testutil.NilError(t, err)
 
 		pods, err := d.GetPods(ctx, true)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		ok := false
 		for _, p := range pods {
@@ -347,15 +298,9 @@ func TestDockerPod(t *testing.T) {
 				ok = true
 				ip := pod.(*DockerPod)
 				dp := p.(*DockerPod)
-				if len(dp.containers) != 1 {
-					t.Fatalf("expected 1 container, got %d containers", len(dp.containers))
-				}
-				if dp.containers[0].ID != ip.containers[1].ID {
-					t.Fatalf("different container id, want: %q, got: %q", dp.containers[0].ID, ip.containers[1].ID)
-				}
-				if diff := cmp.Diff(ip.containers[1], dp.containers[0]); diff != "" {
-					t.Error(diff)
-				}
+				assert.Assert(t, cmp.Len(dp.containers, 1))
+				assert.Equal(t, dp.containers[0].ID, ip.containers[1].ID)
+				assert.DeepEqual(t, ip.containers[1], dp.containers[0])
 			}
 		}
 		if !ok {
@@ -383,25 +328,19 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		ce, err := pod.Exec(ctx, &ExecConfig{
 			Cmd: []string{"sh", "-c", "if [ $(grep /mnt/tmpfs /proc/mounts | grep -c size=1024k) -ne 1 ]; then exit 1; fi"},
 		})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		code, err := ce.Wait(ctx)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if code != 0 {
-			t.Fatalf("unexpected exit code: %d", code)
-		}
+		testutil.NilError(t, err)
+
+		assert.Equal(t, code, 0)
 	})
 
 	t.Run("test pod with a tmpfs volume without size limit", func(t *testing.T) {
@@ -422,25 +361,19 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		ce, err := pod.Exec(ctx, &ExecConfig{
 			Cmd: []string{"sh", "-c", "if [ $(grep -c /mnt/tmpfs /proc/mounts) -ne 1 ]; then exit 1; fi"},
 		})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		code, err := ce.Wait(ctx)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if code != 0 {
-			t.Fatalf("unexpected exit code: %d", code)
-		}
+		testutil.NilError(t, err)
+
+		assert.Equal(t, code, 0)
 	})
 
 	t.Run("test pod with two tmpfs volumes with size limit", func(t *testing.T) {
@@ -469,25 +402,19 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		ce, err := pod.Exec(ctx, &ExecConfig{
 			Cmd: []string{"sh", "-c", "if [ $(grep /mnt/vol1 /proc/mounts | grep -c size=1024k) -ne 1 -o $(grep /mnt/vol2 /proc/mounts | grep -c size=1024k) -ne 1 ]; then exit 1; fi"},
 		})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		code, err := ce.Wait(ctx)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if code != 0 {
-			t.Fatalf("unexpected exit code: %d", code)
-		}
+		testutil.NilError(t, err)
+
+		assert.Equal(t, code, 0)
 	})
 
 	t.Run("test pod with two tmpfs volumes one with size limit and one without", func(t *testing.T) {
@@ -514,24 +441,18 @@ func TestDockerPod(t *testing.T) {
 			},
 			InitVolumeDir: "/tmp/agola",
 		}, io.Discard)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
+
 		defer func() { _ = pod.Remove(ctx) }()
 
 		ce, err := pod.Exec(ctx, &ExecConfig{
 			Cmd: []string{"sh", "-c", "if [ $(grep /mnt/vol1 /proc/mounts | grep -c size=1024k) -ne 1 -o $(grep -c /mnt/vol2 /proc/mounts) -ne 1 ]; then exit 1; fi"},
 		})
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		testutil.NilError(t, err)
 
 		code, err := ce.Wait(ctx)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if code != 0 {
-			t.Fatalf("unexpected exit code: %d", code)
-		}
+		testutil.NilError(t, err)
+
+		assert.Equal(t, code, 0)
 	})
 }

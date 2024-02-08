@@ -192,62 +192,50 @@ func NewUsersHandler(log zerolog.Logger, ah *action.ActionHandler) *UsersHandler
 }
 
 func (h *UsersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(w, r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *UsersHandler) do(w http.ResponseWriter, r *http.Request) ([]*gwapitypes.PrivateUserResponse, error) {
 	ctx := r.Context()
 
 	query := r.URL.Query()
 
-	limitS := query.Get("limit")
-	limit := DefaultRunsLimit
-	if limitS != "" {
-		var err error
-		limit, err = strconv.Atoi(limitS)
-		if err != nil {
-			util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse limit")))
-			return
-		}
-	}
-	if limit < 0 {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Errorf("limit must be greater or equal than 0")))
-		return
-	}
-	if limit > MaxRunsLimit {
-		limit = MaxRunsLimit
-	}
-	asc := false
-	if _, ok := query["asc"]; ok {
-		asc = true
+	ropts, err := parseRequestOptions(r)
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	start := query.Get("start")
 	queryType := query.Get("query_type")
 
 	var ausers []*action.PrivateUserResponse
-	var err error
 	switch queryType {
 	case "byremoteuser":
 		remoteUserID := query.Get("remoteuserid")
 		rsRef := query.Get("remotesourceref")
 
 		user, err := h.ah.GetUserByLinkedAccountRemoteUserAndSource(ctx, remoteUserID, rsRef)
-		if util.HTTPError(w, err) {
-			h.log.Err(err).Send()
-			return
+		if err != nil {
+			return nil, errors.WithStack(err)
 		}
 		ausers = []*action.PrivateUserResponse{user}
 	case "":
-		areq := &action.GetUsersRequest{
-			Start: start,
-			Limit: limit,
-			Asc:   asc,
+		areq := &action.GetUsersRequest{Cursor: ropts.Cursor, Limit: ropts.Limit, SortDirection: action.SortDirection(ropts.SortDirection)}
+		ares, err := h.ah.GetUsers(ctx, areq)
+		if err != nil {
+			return nil, errors.WithStack(err)
 		}
-		ausers, err = h.ah.GetUsers(ctx, areq)
-		if util.HTTPError(w, err) {
-			h.log.Err(err).Send()
-			return
-		}
+		ausers = ares.Users
+		addCursorHeader(w, ares.Cursor)
 	default:
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Errorf("unknown query_type: %q", queryType)))
-		return
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("unknown query_type: %q", queryType))
 	}
 
 	users := make([]*gwapitypes.PrivateUserResponse, len(ausers))
@@ -255,9 +243,7 @@ func (h *UsersHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		users[i] = createPrivateUserResponse(p.User, p.Tokens, p.LinkedAccounts)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusOK, users); err != nil {
-		h.log.Err(err).Send()
-	}
+	return users, nil
 }
 
 type CreateUserLAHandler struct {
@@ -635,23 +621,10 @@ func NewUserOrgsHandler(log zerolog.Logger, ah *action.ActionHandler) *UserOrgsH
 }
 
 func (h *UserOrgsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	userID := common.CurrentUserID(ctx)
-	if userID == "" {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Errorf("user not authenticated")))
-		return
-	}
-
-	userOrgs, err := h.ah.GetUserOrgs(ctx, userID)
+	res, err := h.do(w, r)
 	if util.HTTPError(w, err) {
 		h.log.Err(err).Send()
 		return
-	}
-
-	res := make([]*gwapitypes.UserOrgsResponse, len(userOrgs))
-	for i, userOrg := range userOrgs {
-		res[i] = createUserOrgsResponse(userOrg)
 	}
 
 	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
@@ -659,8 +632,36 @@ func (h *UserOrgsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func createUserOrgsResponse(o *csapitypes.UserOrgsResponse) *gwapitypes.UserOrgsResponse {
-	userOrgs := &gwapitypes.UserOrgsResponse{
+func (h *UserOrgsHandler) do(w http.ResponseWriter, r *http.Request) ([]*gwapitypes.UserOrgResponse, error) {
+	ctx := r.Context()
+
+	userID := common.CurrentUserID(ctx)
+	if userID == "" {
+		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("user not authenticated"))
+	}
+
+	ropts, err := parseRequestOptions(r)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	ares, err := h.ah.GetUserOrgs(ctx, &action.GetUserOrgsRequest{UserRef: userID, Cursor: ropts.Cursor, Limit: ropts.Limit, SortDirection: action.SortDirection(ropts.SortDirection)})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	res := make([]*gwapitypes.UserOrgResponse, len(ares.Orgs))
+	for i, userOrg := range ares.Orgs {
+		res[i] = createUserOrgsResponse(userOrg)
+	}
+
+	addCursorHeader(w, ares.Cursor)
+
+	return res, nil
+}
+
+func createUserOrgsResponse(o *csapitypes.UserOrgResponse) *gwapitypes.UserOrgResponse {
+	userOrgs := &gwapitypes.UserOrgResponse{
 		Organization: createOrgResponse(o.Organization),
 		Role:         gwapitypes.MemberRole(o.Role),
 	}

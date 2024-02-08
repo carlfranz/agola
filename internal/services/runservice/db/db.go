@@ -15,7 +15,7 @@ import (
 	"agola.io/agola/services/runservice/types"
 )
 
-//go:generate ../../../../tools/bin/dbgenerator -component runservice
+//go:generate ../../../../tools/bin/dbgenerator -type db -component runservice
 
 type DB struct {
 	log zerolog.Logger
@@ -31,6 +31,10 @@ func NewDB(log zerolog.Logger, sdb *sql.DB) (*DB, error) {
 
 func (d *DB) DBType() sql.Type {
 	return d.sdb.Type()
+}
+
+func (d *DB) DB() *sql.DB {
+	return d.sdb
 }
 
 func (d *DB) Do(ctx context.Context, f func(tx *sql.Tx) error) error {

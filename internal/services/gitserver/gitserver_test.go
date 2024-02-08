@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sorintlab/errors"
+	"gotest.tools/assert"
 
 	"agola.io/agola/internal/services/config"
 	"agola.io/agola/internal/testutil"
@@ -34,29 +34,24 @@ const (
 )
 
 func createTag(t *testing.T, ctx context.Context, git *util.Git, committerTime time.Time) {
-	if _, err := git.Output(ctx, nil, "branch", "test"); err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	_, err := git.Output(ctx, nil, "branch", "test")
+	testutil.NilError(t, err)
 
-	if _, err := git.Output(ctx, nil, "checkout", "test"); err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	_, err = git.Output(ctx, nil, "checkout", "test")
+	testutil.NilError(t, err)
 
 	git.Env = append(git.Env, "GIT_COMMITTER_DATE="+committerTime.Format(time.RFC3339))
-	if _, err := git.Output(ctx, nil, "commit", "--allow-empty", "-m", "root commit"); err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	_, err = git.Output(ctx, nil, "commit", "--allow-empty", "-m", "root commit")
+	testutil.NilError(t, err)
 
-	if _, err := git.Output(ctx, nil, "tag", tagName, "-m", "tag test"); err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	_, err = git.Output(ctx, nil, "tag", tagName, "-m", "tag test")
+	testutil.NilError(t, err)
 }
 
 func createBranch(t *testing.T, ctx context.Context, git *util.Git, committerTime time.Time) {
 	git.Env = append(git.Env, "GIT_COMMITTER_DATE="+committerTime.Format(time.RFC3339))
-	if _, err := git.Output(ctx, nil, "commit", "--allow-empty", "-m", "'root commit'"); err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
+	_, err := git.Output(ctx, nil, "commit", "--allow-empty", "-m", "'root commit'")
+	testutil.NilError(t, err)
 }
 
 func TestRepoCleaner(t *testing.T) {
@@ -101,30 +96,24 @@ func TestRepoCleaner(t *testing.T) {
 			}
 
 			gs, err := NewGitserver(ctx, log, config)
-			if err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
+			testutil.NilError(t, err)
 
 			userDirRepo := filepath.Join(gitDataDir, "user01", "repo01")
 			err = os.MkdirAll(userDirRepo, os.ModePerm)
-			if err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
+			testutil.NilError(t, err)
 
 			git := &util.Git{GitDir: userDirRepo}
+			_, err = git.Output(ctx, nil, "init")
+			testutil.NilError(t, err)
 
-			if _, err := git.Output(ctx, nil, "init"); err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
-			if _, err := git.Output(ctx, nil, "config", "--unset", "core.bare"); err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
-			if _, err := git.Output(ctx, nil, "config", "user.email", "user01@example.com"); err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
-			if _, err := git.Output(ctx, nil, "config", "user.name", "user01"); err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
+			_, err = git.Output(ctx, nil, "config", "--unset", "core.bare")
+			testutil.NilError(t, err)
+
+			_, err = git.Output(ctx, nil, "config", "user.email", "user01@example.com")
+			testutil.NilError(t, err)
+
+			_, err = git.Output(ctx, nil, "config", "user.name", "user01")
+			testutil.NilError(t, err)
 
 			var committerTime time.Time
 			if tt.branchOldTime {
@@ -140,28 +129,21 @@ func TestRepoCleaner(t *testing.T) {
 				committerTime = time.Now()
 			}
 			createTag(t, ctx, git, committerTime)
+			_, err = git.Output(ctx, nil, "config", "--bool", "core.bare", "true")
+			testutil.NilError(t, err)
 
-			if _, err := git.Output(ctx, nil, "config", "--bool", "core.bare", "true"); err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
-
-			if err := gs.scanRepos(ctx); err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
+			err = gs.scanRepos(ctx)
+			testutil.NilError(t, err)
 
 			if tt.branchOldTime && tt.tagOldTime {
 				_, err = os.Open(userDirRepo)
-				if !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("got %v error, want error: %v", err, os.ErrNotExist)
-				}
+				assert.ErrorType(t, err, os.IsNotExist)
 
 				return
 			}
 
 			branches, err := gs.getBranches(git, ctx)
-			if err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
+			testutil.NilError(t, err)
 
 			found := false
 			for _, b := range branches {
@@ -170,17 +152,12 @@ func TestRepoCleaner(t *testing.T) {
 					break
 				}
 			}
-			if tt.branchOldTime && found {
-				t.Fatalf("expected branch %s deleted", branchName)
-			}
-			if !tt.branchOldTime && !found {
-				t.Fatalf("expected branch %s", branchName)
-			}
+			assert.Assert(t, !tt.branchOldTime || !found, "expected branch %s deleted", branchName)
+			assert.Assert(t, tt.branchOldTime || found, "expected branch %s", branchName)
 
 			tags, err := gs.getTags(git, ctx)
-			if err != nil {
-				t.Fatalf("unexpected err: %v", err)
-			}
+			testutil.NilError(t, err)
+
 			found = false
 			for _, b := range tags {
 				if b == tagName {
@@ -188,12 +165,8 @@ func TestRepoCleaner(t *testing.T) {
 					break
 				}
 			}
-			if tt.tagOldTime && found {
-				t.Fatalf("expected tag %s deleted", tagName)
-			}
-			if !tt.tagOldTime && !found {
-				t.Fatalf("expected tag %s", tagName)
-			}
+			assert.Assert(t, !tt.tagOldTime || !found, "expected tag %s deleted", tagName)
+			assert.Assert(t, tt.tagOldTime || found, "expected tag %s", tagName)
 		})
 	}
 }

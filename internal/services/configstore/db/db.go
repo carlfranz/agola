@@ -17,7 +17,7 @@ import (
 	"agola.io/agola/services/configstore/types"
 )
 
-//go:generate ../../../../tools/bin/dbgenerator -component configstore
+//go:generate ../../../../tools/bin/dbgenerator -type db -component configstore
 
 type DB struct {
 	log zerolog.Logger
@@ -33,6 +33,10 @@ func NewDB(log zerolog.Logger, sdb *sql.DB) (*DB, error) {
 
 func (d *DB) DBType() sql.Type {
 	return d.sdb.Type()
+}
+
+func (d *DB) DB() *sql.DB {
+	return d.sdb
 }
 
 func (d *DB) Do(ctx context.Context, f func(tx *sql.Tx) error) error {
@@ -174,17 +178,20 @@ func (d *DB) GetRemoteSourceByName(tx *sql.Tx, name string) (*types.RemoteSource
 	return out, errors.WithStack(err)
 }
 
-func getRemoteSourcesFilteredQuery(startRemoteSourceName string, limit int, asc bool) *sq.SelectBuilder {
+func getRemoteSourcesFilteredQuery(startRemoteSourceName string, limit int, sortDirection types.SortDirection) *sq.SelectBuilder {
 	q := remoteSourceSelect()
-	if asc {
-		q = q.OrderBy("remotesource.name").Asc()
-	} else {
-		q = q.OrderBy("remotesource.name").Desc()
+	q = q.OrderBy("remotesource.name")
+	switch sortDirection {
+	case types.SortDirectionAsc:
+		q = q.Asc()
+	case types.SortDirectionDesc:
+		q = q.Desc()
 	}
 	if startRemoteSourceName != "" {
-		if asc {
+		switch sortDirection {
+		case types.SortDirectionAsc:
 			q = q.Where(q.G("remotesource.name", startRemoteSourceName))
-		} else {
+		case types.SortDirectionDesc:
 			q = q.Where(q.L("remotesource.name", startRemoteSourceName))
 		}
 	}
@@ -195,8 +202,8 @@ func getRemoteSourcesFilteredQuery(startRemoteSourceName string, limit int, asc 
 	return q
 }
 
-func (d *DB) GetRemoteSources(tx *sql.Tx, startRemoteSourceName string, limit int, asc bool) ([]*types.RemoteSource, error) {
-	q := getRemoteSourcesFilteredQuery(startRemoteSourceName, limit, asc)
+func (d *DB) GetRemoteSources(tx *sql.Tx, startRemoteSourceName string, limit int, sortDirection types.SortDirection) ([]*types.RemoteSource, error) {
+	q := getRemoteSourcesFilteredQuery(startRemoteSourceName, limit, sortDirection)
 	remoteSources, _, err := d.fetchRemoteSources(tx, q)
 
 	return remoteSources, errors.WithStack(err)
@@ -380,17 +387,20 @@ func (d *DB) DeleteLinkedAccountsByUserID(tx *sql.Tx, userID string) error {
 	return nil
 }
 
-func getUsersFilteredQuery(startUserName string, limit int, asc bool) *sq.SelectBuilder {
+func getUsersFilteredQuery(startUserName string, limit int, sortDirection types.SortDirection) *sq.SelectBuilder {
 	q := userSelect()
-	if asc {
-		q = q.OrderBy("user_t.name").Asc()
-	} else {
-		q = q.OrderBy("user_t.name").Desc()
+	q = q.OrderBy("user_t.name")
+	switch sortDirection {
+	case types.SortDirectionAsc:
+		q = q.Asc()
+	case types.SortDirectionDesc:
+		q = q.Desc()
 	}
 	if startUserName != "" {
-		if asc {
+		switch sortDirection {
+		case types.SortDirectionAsc:
 			q = q.Where(q.G("user_t.name", startUserName))
-		} else {
+		case types.SortDirectionDesc:
 			q = q.Where(q.L("user_t.name", startUserName))
 		}
 	}
@@ -401,8 +411,8 @@ func getUsersFilteredQuery(startUserName string, limit int, asc bool) *sq.Select
 	return q
 }
 
-func (d *DB) GetUsers(tx *sql.Tx, startUserName string, limit int, asc bool) ([]*types.User, error) {
-	q := getUsersFilteredQuery(startUserName, limit, asc)
+func (d *DB) GetUsers(tx *sql.Tx, startUserName string, limit int, sortDirection types.SortDirection) ([]*types.User, error) {
+	q := getUsersFilteredQuery(startUserName, limit, sortDirection)
 	users, _, err := d.fetchUsers(tx, q)
 
 	return users, errors.WithStack(err)
@@ -448,20 +458,28 @@ func (d *DB) GetOrgByName(tx *sql.Tx, name string) (*types.Organization, error) 
 	return out, errors.WithStack(err)
 }
 
-func getOrgsFilteredQuery(startOrgName string, limit int, asc bool) *sq.SelectBuilder {
+func getOrgsFilteredQuery(startOrgName string, visibilities []types.Visibility, limit int, sortDirection types.SortDirection) *sq.SelectBuilder {
 	q := organizationSelect()
-	if asc {
-		q = q.OrderBy("name").Asc()
-	} else {
-		q = q.OrderBy("name").Desc()
+	q = q.OrderBy("name")
+	switch sortDirection {
+	case types.SortDirectionAsc:
+		q = q.Asc()
+	case types.SortDirectionDesc:
+		q = q.Desc()
 	}
 	if startOrgName != "" {
-		if asc {
+		switch sortDirection {
+		case types.SortDirectionAsc:
 			q = q.Where(q.G("name", startOrgName))
-		} else {
+		case types.SortDirectionDesc:
 			q = q.Where(q.L("name", startOrgName))
 		}
 	}
+
+	if len(visibilities) > 0 {
+		q.Where(q.In("visibility", sq.Flatten(visibilities)...))
+	}
+
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -469,19 +487,11 @@ func getOrgsFilteredQuery(startOrgName string, limit int, asc bool) *sq.SelectBu
 	return q
 }
 
-func (d *DB) GetOrgs(tx *sql.Tx, startOrgName string, limit int, asc bool) ([]*types.Organization, error) {
-	q := getOrgsFilteredQuery(startOrgName, limit, asc)
+func (d *DB) GetOrgs(tx *sql.Tx, startOrgName string, visibilities []types.Visibility, limit int, sortDirection types.SortDirection) ([]*types.Organization, error) {
+	q := getOrgsFilteredQuery(startOrgName, visibilities, limit, sortDirection)
 	orgs, _, err := d.fetchOrganizations(tx, q)
 
 	return orgs, errors.WithStack(err)
-}
-
-func (d *DB) GetOrgMembers(tx *sql.Tx, orgID string) ([]*types.OrganizationMember, error) {
-	q := organizationMemberSelect()
-	q.Where(q.E("organization_id", orgID))
-	orgMembers, _, err := d.fetchOrganizationMembers(tx, q)
-
-	return orgMembers, errors.WithStack(err)
 }
 
 func (d *DB) GetOrgMemberByOrgUserID(tx *sql.Tx, orgID, userID string) (*types.OrganizationMember, error) {
@@ -534,8 +544,7 @@ type OrgUser struct {
 	Role types.MemberRole
 }
 
-// TODO(sgotti) implement cursor fetching
-func (d *DB) GetOrgUsers(tx *sql.Tx, orgID string) ([]*OrgUser, error) {
+func (d *DB) GetOrgMembers(tx *sql.Tx, orgID string, startUserName string, limit int, sortDirection types.SortDirection) ([]*OrgUser, error) {
 	cols := organizationMemberSelectColumns()
 	cols = append(cols, userSelectColumns()...)
 
@@ -543,6 +552,25 @@ func (d *DB) GetOrgUsers(tx *sql.Tx, orgID string) ([]*OrgUser, error) {
 	q = q.Join("user_t", "user_t.id = orgmember.user_id")
 	q = q.Where(q.E("orgmember.organization_id", orgID))
 	q = q.OrderBy("user_t.name")
+	switch sortDirection {
+	case types.SortDirectionAsc:
+		q.Asc()
+	case types.SortDirectionDesc:
+		q.Desc()
+	}
+
+	if startUserName != "" {
+		switch sortDirection {
+		case types.SortDirectionAsc:
+			q = q.Where(q.G("user_t.name", startUserName))
+		case types.SortDirectionDesc:
+			q = q.Where(q.L("user_t.name", startUserName))
+		}
+	}
+
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
 
 	rows, err := d.query(tx, q)
 	if err != nil {
@@ -585,15 +613,14 @@ type UserOrg struct {
 	Role         types.MemberRole
 }
 
-// TODO(sgotti) implement cursor fetching
-func (d *DB) GetUserOrgs(tx *sql.Tx, userID string) ([]*UserOrg, error) {
+func (d *DB) GetUserOrg(tx *sql.Tx, userID string, orgID string) (*UserOrg, error) {
 	cols := organizationMemberSelectColumns()
 	cols = append(cols, organizationSelectColumns()...)
 
 	q := sq.Select(cols...).From("orgmember")
-	q = q.Where(q.E("orgmember.user_id", userID))
 	q = q.Join("organization", "organization.id = orgmember.organization_id")
-	q = q.OrderBy("organization.name")
+	q = q.Where(q.E("orgmember.user_id", userID))
+	q = q.Where(q.E("organization.id", orgID))
 
 	rows, err := d.query(tx, q)
 	if err != nil {
@@ -611,7 +638,72 @@ func (d *DB) GetUserOrgs(tx *sql.Tx, userID string) ([]*UserOrg, error) {
 
 		orgMember, _, err := d.OrganizationMemberFromArray(orgMemberCols, tx.ID())
 		if err != nil {
+			return nil, errors.Wrapf(err, "failed to fetch orgmember")
+		}
+
+		org, _, err := d.OrganizationFromArray(organizationCols, tx.ID())
+		if err != nil {
 			return nil, errors.Wrapf(err, "failed to fetch org")
+		}
+
+		userorgs = append(userorgs, &UserOrg{
+			Organization: org,
+			Role:         orgMember.MemberRole,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	out, err := mustSingleRow(userorgs)
+	return out, errors.WithStack(err)
+}
+
+func (d *DB) GetUserOrgs(tx *sql.Tx, userID string, startOrgName string, limit int, sortDirection types.SortDirection) ([]*UserOrg, error) {
+	cols := organizationMemberSelectColumns()
+	cols = append(cols, organizationSelectColumns()...)
+
+	q := sq.Select(cols...).From("orgmember")
+	q = q.Where(q.E("orgmember.user_id", userID))
+	q = q.Join("organization", "organization.id = orgmember.organization_id")
+	q = q.OrderBy("organization.name")
+	switch sortDirection {
+	case types.SortDirectionAsc:
+		q.Asc()
+	case types.SortDirectionDesc:
+		q.Desc()
+	}
+
+	if startOrgName != "" {
+		switch sortDirection {
+		case types.SortDirectionAsc:
+			q = q.Where(q.G("organization.name", startOrgName))
+		case types.SortDirectionDesc:
+			q = q.Where(q.L("organization.name", startOrgName))
+		}
+	}
+
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+
+	rows, err := d.query(tx, q)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	defer rows.Close()
+
+	userorgs := []*UserOrg{}
+	for rows.Next() {
+		orgMemberCols := d.OrganizationMemberArray()
+		organizationCols := d.OrganizationArray()
+		if err := d.scanArray(rows, orgMemberCols, organizationCols); err != nil {
+			return nil, errors.Wrapf(err, "failed to scan rows")
+		}
+
+		orgMember, _, err := d.OrganizationMemberFromArray(orgMemberCols, tx.ID())
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to fetch orgmember")
 		}
 
 		org, _, err := d.OrganizationFromArray(organizationCols, tx.ID())

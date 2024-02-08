@@ -36,14 +36,15 @@ func (h *ActionHandler) GetProject(ctx context.Context, projectRef string) (*csa
 		return nil, errors.WithStack(err)
 	}
 
-	isProjectMember, err := h.IsProjectMember(ctx, project.OwnerType, project.OwnerID)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to determine ownership")
-	}
 	if project.GlobalVisibility == cstypes.VisibilityPublic {
 		return project, nil
 	}
-	if !isProjectMember {
+
+	isMember, err := h.IsAuthUserMember(ctx, project.OwnerType, project.OwnerID)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to determine ownership")
+	}
+	if !isMember {
 		return nil, util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
 	}
 
@@ -51,13 +52,14 @@ func (h *ActionHandler) GetProject(ctx context.Context, projectRef string) (*csa
 }
 
 type CreateProjectRequest struct {
-	Name                string
-	ParentRef           string
-	Visibility          cstypes.Visibility
-	RemoteSourceName    string
-	RepoPath            string
-	SkipSSHHostKeyCheck bool
-	PassVarsToForkedPR  bool
+	Name                        string
+	ParentRef                   string
+	Visibility                  cstypes.Visibility
+	RemoteSourceName            string
+	RepoPath                    string
+	SkipSSHHostKeyCheck         bool
+	PassVarsToForkedPR          bool
+	MembersCanPerformRunActions bool
 }
 
 func (h *ActionHandler) CreateProject(ctx context.Context, req *CreateProjectRequest) (*csapitypes.Project, error) {
@@ -78,7 +80,7 @@ func (h *ActionHandler) CreateProject(ctx context.Context, req *CreateProjectReq
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project group %q", parentRef))
 	}
 
-	isProjectOwner, err := h.IsProjectOwner(ctx, pg.OwnerType, pg.OwnerID)
+	isProjectOwner, err := h.IsAuthUserProjectOwner(ctx, pg.OwnerType, pg.OwnerID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -127,16 +129,17 @@ func (h *ActionHandler) CreateProject(ctx context.Context, req *CreateProjectReq
 			Kind: cstypes.ObjectKindProjectGroup,
 			ID:   parentRef,
 		},
-		Visibility:                 req.Visibility,
-		RemoteRepositoryConfigType: cstypes.RemoteRepositoryConfigTypeRemoteSource,
-		RemoteSourceID:             rs.ID,
-		LinkedAccountID:            la.ID,
-		RepositoryID:               repo.ID,
-		RepositoryPath:             req.RepoPath,
-		SSHPrivateKey:              string(privateKey),
-		SkipSSHHostKeyCheck:        req.SkipSSHHostKeyCheck,
-		PassVarsToForkedPR:         req.PassVarsToForkedPR,
-		DefaultBranch:              repo.DefaultBranch,
+		Visibility:                  req.Visibility,
+		RemoteRepositoryConfigType:  cstypes.RemoteRepositoryConfigTypeRemoteSource,
+		RemoteSourceID:              rs.ID,
+		LinkedAccountID:             la.ID,
+		RepositoryID:                repo.ID,
+		RepositoryPath:              req.RepoPath,
+		SSHPrivateKey:               string(privateKey),
+		SkipSSHHostKeyCheck:         req.SkipSSHHostKeyCheck,
+		PassVarsToForkedPR:          req.PassVarsToForkedPR,
+		DefaultBranch:               repo.DefaultBranch,
+		MembersCanPerformRunActions: req.MembersCanPerformRunActions,
 	}
 
 	h.log.Info().Msgf("creating project")
@@ -169,8 +172,9 @@ type UpdateProjectRequest struct {
 	Name      *string
 	ParentRef *string
 
-	Visibility         *cstypes.Visibility
-	PassVarsToForkedPR *bool
+	Visibility                  *cstypes.Visibility
+	PassVarsToForkedPR          *bool
+	MembersCanPerformRunActions *bool
 }
 
 func (h *ActionHandler) UpdateProject(ctx context.Context, projectRef string, req *UpdateProjectRequest) (*csapitypes.Project, error) {
@@ -179,7 +183,7 @@ func (h *ActionHandler) UpdateProject(ctx context.Context, projectRef string, re
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
 	}
 
-	isProjectOwner, err := h.IsProjectOwner(ctx, p.OwnerType, p.OwnerID)
+	isProjectOwner, err := h.IsAuthUserProjectOwner(ctx, p.OwnerType, p.OwnerID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -199,20 +203,24 @@ func (h *ActionHandler) UpdateProject(ctx context.Context, projectRef string, re
 	if req.PassVarsToForkedPR != nil {
 		p.PassVarsToForkedPR = *req.PassVarsToForkedPR
 	}
+	if req.MembersCanPerformRunActions != nil {
+		p.MembersCanPerformRunActions = *req.MembersCanPerformRunActions
+	}
 
 	creq := &csapitypes.CreateUpdateProjectRequest{
-		Name:                       p.Name,
-		Parent:                     p.Parent,
-		Visibility:                 p.Visibility,
-		RemoteRepositoryConfigType: p.RemoteRepositoryConfigType,
-		RemoteSourceID:             p.RemoteSourceID,
-		LinkedAccountID:            p.LinkedAccountID,
-		RepositoryID:               p.RepositoryID,
-		RepositoryPath:             p.RepositoryPath,
-		SSHPrivateKey:              p.SSHPrivateKey,
-		SkipSSHHostKeyCheck:        p.SkipSSHHostKeyCheck,
-		PassVarsToForkedPR:         p.PassVarsToForkedPR,
-		DefaultBranch:              p.DefaultBranch,
+		Name:                        p.Name,
+		Parent:                      p.Parent,
+		Visibility:                  p.Visibility,
+		RemoteRepositoryConfigType:  p.RemoteRepositoryConfigType,
+		RemoteSourceID:              p.RemoteSourceID,
+		LinkedAccountID:             p.LinkedAccountID,
+		RepositoryID:                p.RepositoryID,
+		RepositoryPath:              p.RepositoryPath,
+		SSHPrivateKey:               p.SSHPrivateKey,
+		SkipSSHHostKeyCheck:         p.SkipSSHHostKeyCheck,
+		PassVarsToForkedPR:          p.PassVarsToForkedPR,
+		DefaultBranch:               p.DefaultBranch,
+		MembersCanPerformRunActions: p.MembersCanPerformRunActions,
 	}
 
 	h.log.Info().Msgf("updating project")
@@ -233,7 +241,7 @@ func (h *ActionHandler) ProjectUpdateRepoLinkedAccount(ctx context.Context, proj
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
 	}
 
-	isProjectOwner, err := h.IsProjectOwner(ctx, p.OwnerType, p.OwnerID)
+	isProjectOwner, err := h.IsAuthUserProjectOwner(ctx, p.OwnerType, p.OwnerID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -362,7 +370,7 @@ func (h *ActionHandler) ReconfigProject(ctx context.Context, projectRef string) 
 		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
 	}
 
-	isProjectOwner, err := h.IsProjectOwner(ctx, p.OwnerType, p.OwnerID)
+	isProjectOwner, err := h.IsAuthUserProjectOwner(ctx, p.OwnerType, p.OwnerID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -386,7 +394,7 @@ func (h *ActionHandler) DeleteProject(ctx context.Context, projectRef string) er
 		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
 	}
 
-	isProjectOwner, err := h.IsProjectOwner(ctx, p.OwnerType, p.OwnerID)
+	isProjectOwner, err := h.IsAuthUserProjectOwner(ctx, p.OwnerType, p.OwnerID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -428,7 +436,7 @@ func (h *ActionHandler) ProjectCreateRun(ctx context.Context, projectRef, branch
 		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
 	}
 
-	isProjectOwner, err := h.IsProjectOwner(ctx, p.OwnerType, p.OwnerID)
+	isProjectOwner, err := h.IsAuthUserProjectOwner(ctx, p.OwnerType, p.OwnerID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -595,7 +603,7 @@ func (h *ActionHandler) RefreshRemoteRepositoryInfo(ctx context.Context, project
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get project %q", projectRef))
 	}
 
-	isProjectOwner, err := h.IsProjectOwner(ctx, p.OwnerType, p.OwnerID)
+	isProjectOwner, err := h.IsAuthUserProjectOwner(ctx, p.OwnerType, p.OwnerID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}

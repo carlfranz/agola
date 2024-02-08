@@ -27,7 +27,9 @@ import (
 
 	scommon "agola.io/agola/internal/common"
 	"agola.io/agola/internal/objectstorage"
+	"agola.io/agola/internal/services/common"
 	"agola.io/agola/internal/services/config"
+	"agola.io/agola/internal/services/handlers"
 	"agola.io/agola/internal/services/runservice/action"
 	"agola.io/agola/internal/services/runservice/api"
 	"agola.io/agola/internal/services/runservice/db"
@@ -37,14 +39,14 @@ import (
 	"agola.io/agola/internal/util"
 )
 
-func (s *Runservice) maintenanceModeWatcherLoop(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceModeEnabled bool) {
-	s.log.Info().Msgf("maintenance mode watcher: maintenance mode enabled: %t", maintenanceModeEnabled)
+func (s *Runservice) maintenanceModeWatcherLoop(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceMode bool) {
+	s.log.Info().Msgf("maintenance mode watcher: maintenance mode enabled: %t", maintenanceMode)
 
 	for {
 		s.log.Debug().Msgf("maintenanceModeWatcherLoop")
 
 		// at first watch restart from previous processed revision
-		if err := s.maintenanceModeWatcher(ctx, runCtxCancel, maintenanceModeEnabled); err != nil {
+		if err := s.maintenanceModeWatcher(ctx, runCtxCancel, maintenanceMode); err != nil {
 			s.log.Err(err).Msgf("maintenance mode watcher error")
 		}
 
@@ -57,13 +59,13 @@ func (s *Runservice) maintenanceModeWatcherLoop(ctx context.Context, runCtxCance
 	}
 }
 
-func (s *Runservice) maintenanceModeWatcher(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceModeEnabled bool) error {
+func (s *Runservice) maintenanceModeWatcher(ctx context.Context, runCtxCancel context.CancelFunc, maintenanceMode bool) error {
 	maintenanceEnabled, err := s.ah.IsMaintenanceEnabled(ctx)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 
-	if maintenanceEnabled != maintenanceModeEnabled {
+	if maintenanceEnabled != maintenanceMode {
 		s.log.Info().Msgf("maintenance mode changed to %t", maintenanceEnabled)
 		runCtxCancel()
 	}
@@ -122,43 +124,7 @@ func NewRunservice(ctx context.Context, log zerolog.Logger, c *config.Runservice
 
 	dbm := manager.NewDBManager(log, d, lf)
 
-	setupDB := func() error {
-		if err := dbm.Lock(ctx); err != nil {
-			return errors.WithStack(err)
-		}
-		defer func() { _ = dbm.Unlock() }()
-
-		if err := dbm.Setup(ctx); err != nil {
-			return errors.Wrap(err, "setup db error")
-		}
-
-		curDBVersion, err := dbm.GetVersion(ctx)
-		if err != nil {
-			return errors.WithStack(err)
-		}
-
-		if err := dbm.CheckVersion(curDBVersion, d.Version()); err != nil {
-			return errors.WithStack(err)
-		}
-
-		if curDBVersion == 0 {
-			if err := dbm.Create(ctx, d.DDL(), d.Version()); err != nil {
-				return errors.Wrap(err, "create db error")
-			}
-		} else {
-			migrationRequired, err := dbm.CheckMigrationRequired(curDBVersion, d.Version())
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			if migrationRequired {
-				return errors.Errorf("db requires migration, current version: %d, wanted version: %d", curDBVersion, d.Version())
-			}
-		}
-
-		return nil
-	}
-
-	if err := setupDB(); err != nil {
+	if err := common.SetupDB(ctx, dbm); err != nil {
 		return nil, errors.Wrap(err, "failed to setup db")
 	}
 
@@ -200,8 +166,12 @@ func (s *Runservice) setupDefaultRouter(etCh chan string) http.Handler {
 
 	changeGroupsUpdateTokensHandler := api.NewChangeGroupsUpdateTokensHandler(s.log, s.d, s.ah)
 
+	authHandler := handlers.NewInternalAuthChecker(s.log, s.c.APIToken)
+
 	router := mux.NewRouter().UseEncodedPath().SkipClean(true)
 	apirouter := router.PathPrefix("/api/v1alpha").Subrouter().UseEncodedPath().SkipClean(true)
+
+	apirouter.Use(authHandler)
 
 	// don't return 404 on a call to an undefined handler but 400 to distinguish between a non existent resource and a wrong method
 	apirouter.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadRequest) })

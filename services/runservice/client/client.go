@@ -1,4 +1,4 @@
-// Copyright 2019 Sorint.lab
+// Copyright 2023 Sorint.lab
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,75 +23,46 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/sorintlab/errors"
 
 	"agola.io/agola/internal/util"
+	"agola.io/agola/services/common"
 	rsapitypes "agola.io/agola/services/runservice/api/types"
 	rstypes "agola.io/agola/services/runservice/types"
 )
 
-var jsonContent = http.Header{"Content-Type": []string{"application/json"}}
+type Response struct {
+	*http.Response
+}
 
 type Client struct {
-	url    string
-	client *http.Client
+	*common.Client
 }
 
 // NewClient initializes and returns a API client.
-func NewClient(url string) *Client {
-	return &Client{
-		url:    strings.TrimSuffix(url, "/"),
-		client: &http.Client{},
-	}
+func NewClient(url, token string) *Client {
+	c := common.NewClient(url+"/api/v1alpha", token)
+	return &Client{c}
 }
 
-// SetHTTPClient replaces default http.Client with user given one.
-func (c *Client) SetHTTPClient(client *http.Client) {
-	c.client = client
-}
-
-func (c *Client) doRequest(ctx context.Context, method, path string, query url.Values, contentLength int64, header http.Header, ibody io.Reader) (*http.Response, error) {
-	u, err := url.Parse(c.url + "/api/v1alpha" + path)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	u.RawQuery = query.Encode()
-
-	req, err := http.NewRequest(method, u.String(), ibody)
-	req = req.WithContext(ctx)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	for k, v := range header {
-		req.Header[k] = v
-	}
-
-	if contentLength >= 0 {
-		req.ContentLength = contentLength
-	}
-
-	res, err := c.client.Do(req)
-
-	return res, errors.WithStack(err)
-}
-
-func (c *Client) getResponse(ctx context.Context, method, path string, query url.Values, contentLength int64, header http.Header, ibody io.Reader) (*http.Response, error) {
-	resp, err := c.doRequest(ctx, method, path, query, contentLength, header, ibody)
+func (c *Client) GetResponse(ctx context.Context, method, path string, query url.Values, contentLength int64, header http.Header, ibody io.Reader) (*Response, error) {
+	cresp, err := c.Client.DoRequest(ctx, method, path, query, contentLength, header, ibody)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	if err := util.ErrFromRemote(resp); err != nil {
+	resp := &Response{Response: cresp}
+
+	if err := util.ErrFromRemote(resp.Response); err != nil {
 		return resp, errors.WithStack(err)
 	}
 
 	return resp, nil
 }
 
-func (c *Client) getParsedResponse(ctx context.Context, method, path string, query url.Values, header http.Header, ibody io.Reader, obj interface{}) (*http.Response, error) {
-	resp, err := c.getResponse(ctx, method, path, query, -1, header, ibody)
+func (c *Client) GetParsedResponse(ctx context.Context, method, path string, query url.Values, header http.Header, ibody io.Reader, obj interface{}) (*Response, error) {
+	resp, err := c.GetResponse(ctx, method, path, query, -1, header, ibody)
 	if err != nil {
 		return resp, errors.WithStack(err)
 	}
@@ -102,63 +73,74 @@ func (c *Client) getParsedResponse(ctx context.Context, method, path string, que
 	return resp, errors.WithStack(d.Decode(obj))
 }
 
-func (c *Client) SendExecutorStatus(ctx context.Context, executorID string, executor *rsapitypes.ExecutorStatus) (*http.Response, error) {
+func (c *Client) SendExecutorStatus(ctx context.Context, executorID string, executor *rsapitypes.ExecutorStatus) (*Response, error) {
 	executorj, err := json.Marshal(executor)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return c.getResponse(ctx, "POST", fmt.Sprintf("/executor/%s", executorID), nil, -1, jsonContent, bytes.NewReader(executorj))
+
+	resp, err := c.GetResponse(ctx, "POST", fmt.Sprintf("/executor/%s", executorID), nil, -1, common.JSONContent, bytes.NewReader(executorj))
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) SendExecutorTaskStatus(ctx context.Context, executorID, etID string, et *rsapitypes.ExecutorTaskStatus) (*http.Response, error) {
+func (c *Client) SendExecutorTaskStatus(ctx context.Context, executorID, etID string, et *rsapitypes.ExecutorTaskStatus) (*Response, error) {
 	etj, err := json.Marshal(et)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return c.getResponse(ctx, "POST", fmt.Sprintf("/executor/%s/tasks/%s", executorID, etID), nil, -1, jsonContent, bytes.NewReader(etj))
+
+	resp, err := c.GetResponse(ctx, "POST", fmt.Sprintf("/executor/%s/tasks/%s", executorID, etID), nil, -1, common.JSONContent, bytes.NewReader(etj))
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) GetExecutorTask(ctx context.Context, executorID, etID string) (*rsapitypes.ExecutorTask, *http.Response, error) {
+func (c *Client) GetExecutorTask(ctx context.Context, executorID, etID string) (*rsapitypes.ExecutorTask, *Response, error) {
 	et := new(rsapitypes.ExecutorTask)
-	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/executor/%s/tasks/%s", executorID, etID), nil, jsonContent, nil, et)
+	resp, err := c.GetParsedResponse(ctx, "GET", fmt.Sprintf("/executor/%s/tasks/%s", executorID, etID), nil, common.JSONContent, nil, et)
 	return et, resp, errors.WithStack(err)
 }
 
-func (c *Client) GetExecutorTasks(ctx context.Context, executorID string) ([]*rsapitypes.ExecutorTask, *http.Response, error) {
+func (c *Client) GetExecutorTasks(ctx context.Context, executorID string) ([]*rsapitypes.ExecutorTask, *Response, error) {
 	ets := []*rsapitypes.ExecutorTask{}
-	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/executor/%s/tasks", executorID), nil, jsonContent, nil, &ets)
+	resp, err := c.GetParsedResponse(ctx, "GET", fmt.Sprintf("/executor/%s/tasks", executorID), nil, common.JSONContent, nil, &ets)
 	return ets, resp, errors.WithStack(err)
 }
 
-func (c *Client) GetArchive(ctx context.Context, taskID string, step int) (*http.Response, error) {
+func (c *Client) GetArchive(ctx context.Context, taskID string, step int) (*Response, error) {
 	q := url.Values{}
 	q.Add("taskid", taskID)
 	q.Add("step", strconv.Itoa(step))
 
-	return c.getResponse(ctx, "GET", "/executor/archives", q, -1, nil, nil)
+	resp, err := c.GetResponse(ctx, "GET", "/executor/archives", q, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) CheckCache(ctx context.Context, key string, prefix bool) (*http.Response, error) {
+func (c *Client) CheckCache(ctx context.Context, key string, prefix bool) (*Response, error) {
 	q := url.Values{}
 	if prefix {
 		q.Add("prefix", "")
 	}
-	return c.getResponse(ctx, "HEAD", fmt.Sprintf("/executor/caches/%s", url.PathEscape(key)), q, -1, nil, nil)
+
+	resp, err := c.GetResponse(ctx, "HEAD", fmt.Sprintf("/executor/caches/%s", url.PathEscape(key)), q, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) GetCache(ctx context.Context, key string, prefix bool) (*http.Response, error) {
+func (c *Client) GetCache(ctx context.Context, key string, prefix bool) (*Response, error) {
 	q := url.Values{}
 	if prefix {
 		q.Add("prefix", "")
 	}
-	return c.getResponse(ctx, "GET", fmt.Sprintf("/executor/caches/%s", url.PathEscape(key)), q, -1, nil, nil)
+
+	resp, err := c.GetResponse(ctx, "GET", fmt.Sprintf("/executor/caches/%s", url.PathEscape(key)), q, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) PutCache(ctx context.Context, key string, size int64, r io.Reader) (*http.Response, error) {
-	return c.getResponse(ctx, "POST", fmt.Sprintf("/executor/caches/%s", url.PathEscape(key)), nil, size, nil, r)
+func (c *Client) PutCache(ctx context.Context, key string, size int64, r io.Reader) (*Response, error) {
+
+	resp, err := c.GetResponse(ctx, "POST", fmt.Sprintf("/executor/caches/%s", url.PathEscape(key)), nil, size, nil, r)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) GetRuns(ctx context.Context, phaseFilter, resultFilter, groups []string, lastRun bool, changeGroups []string, startRunSequence uint64, limit int, asc bool) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetRuns(ctx context.Context, phaseFilter, resultFilter, groups []string, lastRun bool, changeGroups []string, startRunSequence uint64, limit int, asc bool) (*rsapitypes.GetRunsResponse, *Response, error) {
 	q := url.Values{}
 	for _, phase := range phaseFilter {
 		q.Add("phase", phase)
@@ -187,35 +169,35 @@ func (c *Client) GetRuns(ctx context.Context, phaseFilter, resultFilter, groups 
 	}
 
 	getRunsResponse := new(rsapitypes.GetRunsResponse)
-	resp, err := c.getParsedResponse(ctx, "GET", "/runs", q, jsonContent, nil, getRunsResponse)
+	resp, err := c.GetParsedResponse(ctx, "GET", "/runs", q, common.JSONContent, nil, getRunsResponse)
 	return getRunsResponse, resp, errors.WithStack(err)
 }
 
-func (c *Client) GetQueuedRuns(ctx context.Context, startRunSequence uint64, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetQueuedRuns(ctx context.Context, startRunSequence uint64, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *Response, error) {
 	return c.GetRuns(ctx, []string{"queued"}, nil, []string{}, false, changeGroups, startRunSequence, limit, true)
 }
 
-func (c *Client) GetRunningRuns(ctx context.Context, startRunSequence uint64, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetRunningRuns(ctx context.Context, startRunSequence uint64, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *Response, error) {
 	return c.GetRuns(ctx, []string{"running"}, nil, []string{}, false, changeGroups, startRunSequence, limit, true)
 }
 
-func (c *Client) GetGroupQueuedRuns(ctx context.Context, group string, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetGroupQueuedRuns(ctx context.Context, group string, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *Response, error) {
 	return c.GetRuns(ctx, []string{"queued"}, nil, []string{group}, false, changeGroups, 0, limit, false)
 }
 
-func (c *Client) GetGroupRunningRuns(ctx context.Context, group string, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetGroupRunningRuns(ctx context.Context, group string, limit int, changeGroups []string) (*rsapitypes.GetRunsResponse, *Response, error) {
 	return c.GetRuns(ctx, []string{"running"}, nil, []string{group}, false, changeGroups, 0, limit, false)
 }
 
-func (c *Client) GetGroupFirstQueuedRuns(ctx context.Context, group string, changeGroups []string) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetGroupFirstQueuedRuns(ctx context.Context, group string, changeGroups []string) (*rsapitypes.GetRunsResponse, *Response, error) {
 	return c.GetRuns(ctx, []string{"queued"}, nil, []string{group}, false, changeGroups, 0, 1, true)
 }
 
-func (c *Client) GetGroupLastRun(ctx context.Context, group string, changeGroups []string) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetGroupLastRun(ctx context.Context, group string, changeGroups []string) (*rsapitypes.GetRunsResponse, *Response, error) {
 	return c.GetRuns(ctx, nil, nil, []string{group}, false, changeGroups, 0, 1, false)
 }
 
-func (c *Client) GetGroupRuns(ctx context.Context, phaseFilter, resultFilter []string, group string, changeGroups []string, startRunCounter uint64, limit int, asc bool) (*rsapitypes.GetRunsResponse, *http.Response, error) {
+func (c *Client) GetGroupRuns(ctx context.Context, phaseFilter, resultFilter []string, group string, changeGroups []string, startRunCounter uint64, limit int, asc bool) (*rsapitypes.GetRunsResponse, *Response, error) {
 	q := url.Values{}
 	for _, phase := range phaseFilter {
 		q.Add("phase", phase)
@@ -237,30 +219,32 @@ func (c *Client) GetGroupRuns(ctx context.Context, phaseFilter, resultFilter []s
 	}
 
 	getRunsResponse := new(rsapitypes.GetRunsResponse)
-	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/runs/group/%s", url.PathEscape(group)), q, jsonContent, nil, getRunsResponse)
+	resp, err := c.GetParsedResponse(ctx, "GET", fmt.Sprintf("/runs/group/%s", url.PathEscape(group)), q, common.JSONContent, nil, getRunsResponse)
 	return getRunsResponse, resp, errors.WithStack(err)
 }
 
-func (c *Client) CreateRun(ctx context.Context, req *rsapitypes.RunCreateRequest) (*rsapitypes.RunResponse, *http.Response, error) {
+func (c *Client) CreateRun(ctx context.Context, req *rsapitypes.RunCreateRequest) (*rsapitypes.RunResponse, *Response, error) {
 	reqj, err := json.Marshal(req)
 	if err != nil {
 		return nil, nil, errors.WithStack(err)
 	}
 
 	res := new(rsapitypes.RunResponse)
-	resp, err := c.getParsedResponse(ctx, "POST", "/runs", nil, jsonContent, bytes.NewReader(reqj), res)
+	resp, err := c.GetParsedResponse(ctx, "POST", "/runs", nil, common.JSONContent, bytes.NewReader(reqj), res)
 	return res, resp, errors.WithStack(err)
 }
 
-func (c *Client) RunActions(ctx context.Context, runID string, req *rsapitypes.RunActionsRequest) (*http.Response, error) {
+func (c *Client) RunActions(ctx context.Context, runID string, req *rsapitypes.RunActionsRequest) (*Response, error) {
 	reqj, err := json.Marshal(req)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return c.getResponse(ctx, "PUT", fmt.Sprintf("/runs/%s/actions", runID), nil, -1, jsonContent, bytes.NewReader(reqj))
+
+	resp, err := c.GetResponse(ctx, "PUT", fmt.Sprintf("/runs/%s/actions", runID), nil, -1, common.JSONContent, bytes.NewReader(reqj))
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) StartRun(ctx context.Context, runID string, changeGroupsUpdateToken string) (*http.Response, error) {
+func (c *Client) StartRun(ctx context.Context, runID string, changeGroupsUpdateToken string) (*Response, error) {
 	req := &rsapitypes.RunActionsRequest{
 		ActionType:              rsapitypes.RunActionTypeChangePhase,
 		Phase:                   rstypes.RunPhaseRunning,
@@ -270,15 +254,17 @@ func (c *Client) StartRun(ctx context.Context, runID string, changeGroupsUpdateT
 	return c.RunActions(ctx, runID, req)
 }
 
-func (c *Client) RunTaskActions(ctx context.Context, runID, taskID string, req *rsapitypes.RunTaskActionsRequest) (*http.Response, error) {
+func (c *Client) RunTaskActions(ctx context.Context, runID, taskID string, req *rsapitypes.RunTaskActionsRequest) (*Response, error) {
 	reqj, err := json.Marshal(req)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return c.getResponse(ctx, "PUT", fmt.Sprintf("/runs/%s/tasks/%s/actions", runID, taskID), nil, -1, jsonContent, bytes.NewReader(reqj))
+
+	resp, err := c.GetResponse(ctx, "PUT", fmt.Sprintf("/runs/%s/tasks/%s/actions", runID, taskID), nil, -1, common.JSONContent, bytes.NewReader(reqj))
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) RunTaskSetAnnotations(ctx context.Context, runID, taskID string, annotations map[string]string, changeGroupsUpdateToken string) (*http.Response, error) {
+func (c *Client) RunTaskSetAnnotations(ctx context.Context, runID, taskID string, annotations map[string]string, changeGroupsUpdateToken string) (*Response, error) {
 	req := &rsapitypes.RunTaskActionsRequest{
 		ActionType:              rsapitypes.RunTaskActionTypeSetAnnotations,
 		Annotations:             annotations,
@@ -288,7 +274,7 @@ func (c *Client) RunTaskSetAnnotations(ctx context.Context, runID, taskID string
 	return c.RunTaskActions(ctx, runID, taskID, req)
 }
 
-func (c *Client) ApproveRunTask(ctx context.Context, runID, taskID string, changeGroupsUpdateToken string) (*http.Response, error) {
+func (c *Client) ApproveRunTask(ctx context.Context, runID, taskID string, changeGroupsUpdateToken string) (*Response, error) {
 	req := &rsapitypes.RunTaskActionsRequest{
 		ActionType:              rsapitypes.RunTaskActionTypeApprove,
 		ChangeGroupsUpdateToken: changeGroupsUpdateToken,
@@ -297,29 +283,29 @@ func (c *Client) ApproveRunTask(ctx context.Context, runID, taskID string, chang
 	return c.RunTaskActions(ctx, runID, taskID, req)
 }
 
-func (c *Client) GetRun(ctx context.Context, runID string, changeGroups []string) (*rsapitypes.RunResponse, *http.Response, error) {
+func (c *Client) GetRun(ctx context.Context, runID string, changeGroups []string) (*rsapitypes.RunResponse, *Response, error) {
 	q := url.Values{}
 	for _, changeGroup := range changeGroups {
 		q.Add("changegroup", changeGroup)
 	}
 
 	runResponse := new(rsapitypes.RunResponse)
-	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/runs/%s", runID), q, jsonContent, nil, runResponse)
+	resp, err := c.GetParsedResponse(ctx, "GET", fmt.Sprintf("/runs/%s", runID), q, common.JSONContent, nil, runResponse)
 	return runResponse, resp, errors.WithStack(err)
 }
 
-func (c *Client) GetRunByGroup(ctx context.Context, group string, runNumber uint64, changeGroups []string) (*rsapitypes.RunResponse, *http.Response, error) {
+func (c *Client) GetRunByGroup(ctx context.Context, group string, runNumber uint64, changeGroups []string) (*rsapitypes.RunResponse, *Response, error) {
 	q := url.Values{}
 	for _, changeGroup := range changeGroups {
 		q.Add("changegroup", changeGroup)
 	}
 
 	runResponse := new(rsapitypes.RunResponse)
-	resp, err := c.getParsedResponse(ctx, "GET", fmt.Sprintf("/runs/group/%s/%d", url.PathEscape(group), runNumber), q, jsonContent, nil, runResponse)
+	resp, err := c.GetParsedResponse(ctx, "GET", fmt.Sprintf("/runs/group/%s/%d", url.PathEscape(group), runNumber), q, common.JSONContent, nil, runResponse)
 	return runResponse, resp, errors.WithStack(err)
 }
 
-func (c *Client) GetLogs(ctx context.Context, runID, taskID string, setup bool, step int, follow bool) (*http.Response, error) {
+func (c *Client) GetLogs(ctx context.Context, runID, taskID string, setup bool, step int, follow bool) (*Response, error) {
 	q := url.Values{}
 	q.Add("runid", runID)
 	q.Add("taskid", taskID)
@@ -332,10 +318,11 @@ func (c *Client) GetLogs(ctx context.Context, runID, taskID string, setup bool, 
 		q.Add("follow", "")
 	}
 
-	return c.getResponse(ctx, "GET", "/logs", q, -1, nil, nil)
+	resp, err := c.GetResponse(ctx, "GET", "/logs", q, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) DeleteLogs(ctx context.Context, runID, taskID string, setup bool, step int) (*http.Response, error) {
+func (c *Client) DeleteLogs(ctx context.Context, runID, taskID string, setup bool, step int) (*Response, error) {
 	q := url.Values{}
 	q.Add("runid", runID)
 	q.Add("taskid", taskID)
@@ -345,34 +332,40 @@ func (c *Client) DeleteLogs(ctx context.Context, runID, taskID string, setup boo
 		q.Add("step", strconv.Itoa(step))
 	}
 
-	return c.getResponse(ctx, "DELETE", "/logs", q, -1, nil, nil)
+	resp, err := c.GetResponse(ctx, "DELETE", "/logs", q, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) GetRunEvents(ctx context.Context, startRunEventID string) (*http.Response, error) {
+func (c *Client) GetRunEvents(ctx context.Context, afterSequence uint64) (*Response, error) {
 	q := url.Values{}
-	q.Add("startruneventid", startRunEventID)
+	q.Add("afterSequence", strconv.FormatUint(afterSequence, 10))
 
-	return c.getResponse(ctx, "GET", "/runs/events", q, -1, nil, nil)
+	resp, err := c.GetResponse(ctx, "GET", "/runs/events", q, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) GetMaintenanceStatus(ctx context.Context) (*rsapitypes.MaintenanceStatusResponse, *http.Response, error) {
+func (c *Client) GetMaintenanceStatus(ctx context.Context) (*rsapitypes.MaintenanceStatusResponse, *Response, error) {
 	maintenanceStatus := new(rsapitypes.MaintenanceStatusResponse)
-	resp, err := c.getParsedResponse(ctx, "GET", "/maintenance", nil, jsonContent, nil, maintenanceStatus)
+	resp, err := c.GetParsedResponse(ctx, "GET", "/maintenance", nil, common.JSONContent, nil, maintenanceStatus)
 	return maintenanceStatus, resp, errors.WithStack(err)
 }
 
-func (c *Client) EnableMaintenance(ctx context.Context) (*http.Response, error) {
-	return c.getResponse(ctx, "PUT", "/maintenance", nil, -1, nil, nil)
+func (c *Client) EnableMaintenance(ctx context.Context) (*Response, error) {
+	resp, err := c.GetResponse(ctx, "PUT", "/maintenance", nil, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) DisableMaintenance(ctx context.Context) (*http.Response, error) {
-	return c.getResponse(ctx, "DELETE", "/maintenance", nil, -1, nil, nil)
+func (c *Client) DisableMaintenance(ctx context.Context) (*Response, error) {
+	resp, err := c.GetResponse(ctx, "DELETE", "/maintenance", nil, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) Export(ctx context.Context) (*http.Response, error) {
-	return c.getResponse(ctx, "GET", "/export", nil, -1, nil, nil)
+func (c *Client) Export(ctx context.Context) (*Response, error) {
+	resp, err := c.GetResponse(ctx, "GET", "/export", nil, -1, nil, nil)
+	return resp, errors.WithStack(err)
 }
 
-func (c *Client) Import(ctx context.Context, r io.Reader) (*http.Response, error) {
-	return c.getResponse(ctx, "POST", "/import", nil, -1, nil, r)
+func (c *Client) Import(ctx context.Context, r io.Reader) (*Response, error) {
+	resp, err := c.GetResponse(ctx, "POST", "/import", nil, -1, nil, r)
+	return resp, errors.WithStack(err)
 }

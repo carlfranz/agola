@@ -26,43 +26,129 @@ import (
 	"agola.io/agola/services/configstore/types"
 )
 
-type OrgMemberResponse struct {
+type OrgMember struct {
 	User *types.User
 	Role types.MemberRole
 }
 
-func orgMemberResponse(orgUser *db.OrgUser) *OrgMemberResponse {
-	return &OrgMemberResponse{
+func orgMemberResponse(orgUser *db.OrgUser) *OrgMember {
+	return &OrgMember{
 		User: orgUser.User,
 		Role: orgUser.Role,
 	}
 }
 
-func (h *ActionHandler) GetOrgMembers(ctx context.Context, orgRef string) ([]*OrgMemberResponse, error) {
-	var orgUsers []*db.OrgUser
+type GetOrgMembersRequest struct {
+	OrgRef        string
+	StartUserName string
+
+	Limit         int
+	SortDirection types.SortDirection
+}
+
+type GetOrgMembersResponse struct {
+	OrgMembers []*OrgMember
+
+	HasMore bool
+}
+
+func (h *ActionHandler) GetOrgMembers(ctx context.Context, req *GetOrgMembersRequest) (*GetOrgMembersResponse, error) {
+	limit := req.Limit
+	if limit > 0 {
+		limit += 1
+	}
+	if req.SortDirection == "" {
+		req.SortDirection = types.SortDirectionAsc
+	}
+
+	var dbOrgMembers []*db.OrgUser
 	err := h.d.Do(ctx, func(tx *sql.Tx) error {
 		var err error
-		org, err := h.d.GetOrg(tx, orgRef)
+		org, err := h.d.GetOrg(tx, req.OrgRef)
 		if err != nil {
 			return errors.WithStack(err)
 		}
 		if org == nil {
-			return util.NewAPIError(util.ErrNotExist, errors.Errorf("org %q doesn't exist", orgRef))
+			return util.NewAPIError(util.ErrNotExist, errors.Errorf("org %q doesn't exist", req.OrgRef))
 		}
 
-		orgUsers, err = h.d.GetOrgUsers(tx, org.ID)
+		dbOrgMembers, err = h.d.GetOrgMembers(tx, org.ID, req.StartUserName, limit, req.SortDirection)
 		return errors.WithStack(err)
 	})
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	res := make([]*OrgMemberResponse, len(orgUsers))
-	for i, orgUser := range orgUsers {
-		res[i] = orgMemberResponse(orgUser)
+	orgMembers := make([]*OrgMember, len(dbOrgMembers))
+	for i, orgUser := range dbOrgMembers {
+		orgMembers[i] = orgMemberResponse(orgUser)
 	}
 
-	return res, nil
+	var hasMore bool
+	if req.Limit > 0 {
+		hasMore = len(orgMembers) > req.Limit
+		if hasMore {
+			orgMembers = orgMembers[0:req.Limit]
+		}
+	}
+
+	return &GetOrgMembersResponse{
+		OrgMembers: orgMembers,
+		HasMore:    hasMore,
+	}, nil
+}
+
+type GetOrgsRequest struct {
+	StartOrgName string
+	Visibilities []types.Visibility
+
+	Limit         int
+	SortDirection types.SortDirection
+}
+
+type GetOrgsResponse struct {
+	Orgs []*types.Organization
+
+	HasMore bool
+}
+
+func (h *ActionHandler) GetOrgs(ctx context.Context, req *GetOrgsRequest) (*GetOrgsResponse, error) {
+	limit := req.Limit
+	if limit > 0 {
+		limit += 1
+	}
+	if req.SortDirection == "" {
+		req.SortDirection = types.SortDirectionAsc
+	}
+
+	visibilities := req.Visibilities
+	if len(visibilities) == 0 {
+		// default to only public visibility
+		visibilities = []types.Visibility{types.VisibilityPublic}
+	}
+
+	var orgs []*types.Organization
+	err := h.d.Do(ctx, func(tx *sql.Tx) error {
+		var err error
+		orgs, err = h.d.GetOrgs(tx, req.StartOrgName, visibilities, limit, req.SortDirection)
+		return errors.WithStack(err)
+	})
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	var hasMore bool
+	if req.Limit > 0 {
+		hasMore = len(orgs) > req.Limit
+		if hasMore {
+			orgs = orgs[0:req.Limit]
+		}
+	}
+
+	return &GetOrgsResponse{
+		Orgs:    orgs,
+		HasMore: hasMore,
+	}, nil
 }
 
 type CreateOrgRequest struct {

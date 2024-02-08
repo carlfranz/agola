@@ -18,6 +18,7 @@ import (
 	"context"
 	"path"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/gofrs/uuid"
@@ -35,11 +36,12 @@ import (
 )
 
 type ActionHandler struct {
-	log             zerolog.Logger
-	d               *db.DB
-	ost             *objectstorage.ObjStorage
-	lf              lock.LockFactory
-	maintenanceMode bool
+	log                  zerolog.Logger
+	d                    *db.DB
+	ost                  *objectstorage.ObjStorage
+	lf                   lock.LockFactory
+	maintenanceMode      bool
+	maintenanceModeMutex sync.Mutex
 }
 
 func NewActionHandler(log zerolog.Logger, d *db.DB, ost *objectstorage.ObjStorage, lf lock.LockFactory) *ActionHandler {
@@ -50,10 +52,6 @@ func NewActionHandler(log zerolog.Logger, d *db.DB, ost *objectstorage.ObjStorag
 		lf:              lf,
 		maintenanceMode: false,
 	}
-}
-
-func (h *ActionHandler) SetMaintenanceMode(maintenanceMode bool) {
-	h.maintenanceMode = maintenanceMode
 }
 
 type RunChangePhaseRequest struct {
@@ -169,8 +167,13 @@ func (h *ActionHandler) ChangeRunPhase(ctx context.Context, req *RunChangePhaseR
 			return errors.Errorf("unsupport change phase %q", req.Phase)
 		}
 
+		rc, err := h.d.GetRunConfig(tx, run.RunConfigID)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
 		run.ChangePhase(req.Phase)
-		runEvent, err := common.NewRunEvent(h.d, tx, run.ID, run.Phase, run.Result)
+		runEvent, err := common.NewRunEvent(h.d, tx, run, rc, types.RunPhaseChanged)
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -527,7 +530,7 @@ func (h *ActionHandler) saveRun(ctx context.Context, rb *types.RunBundle, runcgt
 
 		run.Counter = runCounter
 
-		runEvent, err := common.NewRunEvent(h.d, tx, run.ID, run.Phase, run.Result)
+		runEvent, err := common.NewRunEvent(h.d, tx, run, rc, types.RunPhaseChanged)
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -602,9 +605,9 @@ func genRun(rc *types.RunConfig) *types.Run {
 		return r
 	}
 
-	for _, rct := range rc.Tasks {
+	for id, rct := range rc.Tasks {
 		rt := genRunTask(rct)
-		r.Tasks[rt.ID] = rt
+		r.Tasks[id] = rt
 	}
 
 	return r

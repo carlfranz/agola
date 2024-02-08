@@ -17,7 +17,6 @@ package cmd
 import (
 	"context"
 	"io"
-	"net/http"
 	"os"
 
 	"github.com/rs/zerolog/log"
@@ -99,7 +98,7 @@ func logGet(cmd *cobra.Command, args []string) error {
 		return errors.Errorf(`only one of "--follow" or "--output" can be provided`)
 	}
 
-	gwclient := gwclient.NewClient(gatewayURL, token)
+	gwClient := gwclient.NewClient(gatewayURL, token)
 
 	isProject := !flags.Changed("username")
 
@@ -113,9 +112,9 @@ func logGet(cmd *cobra.Command, args []string) error {
 		var run *gwapitypes.RunResponse
 		var err error
 		if isProject {
-			run, _, err = gwclient.GetProjectRun(context.TODO(), logGetOpts.projectRef, logGetOpts.runNumber)
+			run, _, err = gwClient.GetProjectRun(context.TODO(), logGetOpts.projectRef, logGetOpts.runNumber)
 		} else {
-			run, _, err = gwclient.GetUserRun(context.TODO(), logGetOpts.username, logGetOpts.runNumber)
+			run, _, err = gwClient.GetUserRun(context.TODO(), logGetOpts.username, logGetOpts.runNumber)
 		}
 		if err != nil {
 			return errors.WithStack(err)
@@ -136,12 +135,12 @@ func logGet(cmd *cobra.Command, args []string) error {
 
 	log.Info().Msgf("getting log")
 
-	var resp *http.Response
+	var resp *gwclient.Response
 	var err error
 	if isProject {
-		resp, err = gwclient.GetProjectLogs(context.TODO(), logGetOpts.projectRef, logGetOpts.runNumber, taskid, logGetOpts.setup, logGetOpts.step, logGetOpts.follow)
+		resp, err = gwClient.GetProjectLogs(context.TODO(), logGetOpts.projectRef, logGetOpts.runNumber, taskid, logGetOpts.setup, logGetOpts.step, logGetOpts.follow)
 	} else {
-		resp, err = gwclient.GetUserLogs(context.TODO(), logGetOpts.username, logGetOpts.runNumber, taskid, logGetOpts.setup, logGetOpts.step, logGetOpts.follow)
+		resp, err = gwClient.GetUserLogs(context.TODO(), logGetOpts.username, logGetOpts.runNumber, taskid, logGetOpts.setup, logGetOpts.step, logGetOpts.follow)
 	}
 	if err != nil {
 		return errors.Wrapf(err, "failed to get log")

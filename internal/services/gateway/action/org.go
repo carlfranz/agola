@@ -22,6 +22,7 @@ import (
 	"agola.io/agola/internal/services/gateway/common"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
+	"agola.io/agola/services/configstore/client"
 	cstypes "agola.io/agola/services/configstore/types"
 )
 
@@ -30,26 +31,91 @@ func (h *ActionHandler) GetOrg(ctx context.Context, orgRef string) (*cstypes.Org
 	if err != nil {
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
+
+	if org.Visibility == cstypes.VisibilityPublic {
+		return org, nil
+	}
+
+	isMember, err := h.IsAuthUserMember(ctx, cstypes.ObjectKindOrg, org.ID)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to determine ownership")
+	}
+	if !isMember {
+		return nil, util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
+	}
+
 	return org, nil
 }
 
 type GetOrgsRequest struct {
-	Start string
-	Limit int
-	Asc   bool
+	Cursor string
+
+	Limit         int
+	SortDirection SortDirection
+
+	Public  bool
+	Private bool
 }
 
-func (h *ActionHandler) GetOrgs(ctx context.Context, req *GetOrgsRequest) ([]*cstypes.Organization, error) {
-	orgs, _, err := h.configstoreClient.GetOrgs(ctx, req.Start, req.Limit, req.Asc)
+type GetOrgsResponse struct {
+	Orgs   []*cstypes.Organization
+	Cursor string
+}
+
+func (h *ActionHandler) GetOrgs(ctx context.Context, req *GetOrgsRequest) (*GetOrgsResponse, error) {
+	inCursor := &StartCursor{}
+	sortDirection := req.SortDirection
+	if req.Cursor != "" {
+		if err := UnmarshalCursor(req.Cursor, inCursor); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		sortDirection = inCursor.SortDirection
+	}
+	if sortDirection == "" {
+		sortDirection = SortDirectionAsc
+	}
+
+	isAdmin := common.IsUserAdmin(ctx)
+
+	// only admin will also get private organizations
+	// normal user will only get public organizations. Private organizations where they are members won't be returned.
+	visibilites := []cstypes.Visibility{cstypes.VisibilityPublic}
+	if isAdmin {
+		visibilites = append(visibilites, cstypes.VisibilityPrivate)
+	}
+
+	orgs, resp, err := h.configstoreClient.GetOrgs(ctx, &client.GetOrgsOptions{ListOptions: &client.ListOptions{Limit: req.Limit, SortDirection: cstypes.SortDirection(sortDirection)}, StartOrgName: inCursor.Start, Visibilities: visibilites})
 	if err != nil {
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
-	return orgs, nil
+
+	var outCursor string
+	if resp.HasMore && len(orgs) > 0 {
+		lastRemoteSourceName := orgs[len(orgs)-1].Name
+		outCursor, err = MarshalCursor(&StartCursor{
+			Start:         lastRemoteSourceName,
+			SortDirection: sortDirection,
+		})
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+	}
+
+	res := &GetOrgsResponse{
+		Orgs:   orgs,
+		Cursor: outCursor,
+	}
+
+	return res, nil
 }
 
-type OrgMembersResponse struct {
-	Organization *cstypes.Organization
-	Members      []*OrgMemberResponse
+type GetOrgMembersRequest struct {
+	OrgRef string
+
+	Cursor string
+
+	Limit         int
+	SortDirection SortDirection
 }
 
 type OrgMemberResponse struct {
@@ -57,27 +123,60 @@ type OrgMemberResponse struct {
 	Role cstypes.MemberRole
 }
 
-func (h *ActionHandler) GetOrgMembers(ctx context.Context, orgRef string) (*OrgMembersResponse, error) {
-	org, _, err := h.configstoreClient.GetOrg(ctx, orgRef)
+type GetOrgMembersResponse struct {
+	Organization *cstypes.Organization
+	Members      []*OrgMemberResponse
+	Cursor       string
+}
+
+func (h *ActionHandler) GetOrgMembers(ctx context.Context, req *GetOrgMembersRequest) (*GetOrgMembersResponse, error) {
+	inCursor := &StartCursor{}
+	sortDirection := req.SortDirection
+	if req.Cursor != "" {
+		if err := UnmarshalCursor(req.Cursor, inCursor); err != nil {
+			return nil, errors.WithStack(err)
+		}
+		sortDirection = inCursor.SortDirection
+	}
+	if sortDirection == "" {
+		sortDirection = SortDirectionAsc
+	}
+
+	org, _, err := h.configstoreClient.GetOrg(ctx, req.OrgRef)
 	if err != nil {
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
 
-	orgMembers, _, err := h.configstoreClient.GetOrgMembers(ctx, orgRef)
+	orgMembers, resp, err := h.configstoreClient.GetOrgMembers(ctx, req.OrgRef, &client.GetOrgMembersOptions{ListOptions: &client.ListOptions{Limit: req.Limit, SortDirection: cstypes.SortDirection(sortDirection)}, StartUserName: inCursor.Start})
 	if err != nil {
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
 
-	res := &OrgMembersResponse{
+	var outCursor string
+	if resp.HasMore && len(orgMembers) > 0 {
+		lastUserName := orgMembers[len(orgMembers)-1].User.Name
+		outCursor, err = MarshalCursor(&StartCursor{
+			Start:         lastUserName,
+			SortDirection: sortDirection,
+		})
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+	}
+
+	res := &GetOrgMembersResponse{
 		Organization: org,
 		Members:      make([]*OrgMemberResponse, len(orgMembers)),
+		Cursor:       outCursor,
 	}
+
 	for i, orgMember := range orgMembers {
 		res.Members[i] = &OrgMemberResponse{
 			User: orgMember.User,
 			Role: orgMember.Role,
 		}
 	}
+
 	return res, nil
 }
 
@@ -128,7 +227,7 @@ func (h *ActionHandler) UpdateOrg(ctx context.Context, orgRef string, req *Updat
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
 
-	isOrgOwner, err := h.IsOrgOwner(ctx, org.ID)
+	isOrgOwner, err := h.IsAuthUserOrgOwner(ctx, org.ID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -160,7 +259,7 @@ func (h *ActionHandler) DeleteOrg(ctx context.Context, orgRef string) error {
 		return util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
 
-	isOrgOwner, err := h.IsOrgOwner(ctx, org.ID)
+	isOrgOwner, err := h.IsAuthUserOrgOwner(ctx, org.ID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -194,7 +293,7 @@ func (h *ActionHandler) AddOrgMember(ctx context.Context, orgRef, userRef string
 		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
 
-	isOrgOwner, err := h.IsOrgOwner(ctx, org.ID)
+	isOrgOwner, err := h.IsAuthUserOrgOwner(ctx, org.ID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -220,7 +319,7 @@ func (h *ActionHandler) RemoveOrgMember(ctx context.Context, orgRef, userRef str
 		return util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
 
-	isOrgOwner, err := h.IsOrgOwner(ctx, org.ID)
+	isOrgOwner, err := h.IsAuthUserOrgOwner(ctx, org.ID)
 	if err != nil {
 		return errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -245,12 +344,12 @@ func (h *ActionHandler) GetOrgInvitations(ctx context.Context, orgRef string, li
 		return nil, errors.Errorf("user not logged in")
 	}
 
-	org, err := h.GetOrg(ctx, orgRef)
+	org, _, err := h.configstoreClient.GetOrg(ctx, orgRef)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get org %s:", orgRef)
+		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get org %s", orgRef))
 	}
 
-	isOrgOwner, err := h.IsOrgOwner(ctx, org.ID)
+	isOrgOwner, err := h.IsAuthUserOrgOwner(ctx, org.ID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -290,12 +389,12 @@ func (h *ActionHandler) CreateOrgInvitation(ctx context.Context, req *CreateOrgI
 		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("role is required"))
 	}
 
-	org, err := h.GetOrg(ctx, req.OrganizationRef)
+	org, _, err := h.configstoreClient.GetOrg(ctx, req.OrganizationRef)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get org %s:", req.OrganizationRef)
+		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get org %s", req.OrganizationRef))
 	}
 
-	isOrgOwner, err := h.IsOrgOwner(ctx, org.ID)
+	isOrgOwner, err := h.IsAuthUserOrgOwner(ctx, org.ID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
@@ -303,7 +402,7 @@ func (h *ActionHandler) CreateOrgInvitation(ctx context.Context, req *CreateOrgI
 		return nil, util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
 	}
 
-	isOrgMember, err := h.IsOrgMember(ctx, req.UserRef, req.OrganizationRef)
+	isOrgMember, err := h.IsUserOrgMember(ctx, req.UserRef, req.OrganizationRef)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to determine membership")
 	}
@@ -365,10 +464,11 @@ func (h *ActionHandler) OrgInvitationAction(ctx context.Context, req *OrgInvitat
 		return errors.Errorf("user not authorized")
 	}
 
-	org, err := h.GetOrg(ctx, req.OrgRef)
+	org, _, err := h.configstoreClient.GetOrg(ctx, req.OrgRef)
 	if err != nil {
-		return errors.Wrapf(err, "failed to get org %s:", req.OrgRef)
+		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get org %s", req.OrgRef))
 	}
+
 	if org == nil {
 		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("org %s not found", req.OrgRef))
 	}
@@ -393,12 +493,12 @@ func (h *ActionHandler) DeleteOrgInvitation(ctx context.Context, orgRef string, 
 		return util.NewAPIError(util.KindFromRemoteError(err), err)
 	}
 
-	org, err := h.GetOrg(ctx, orgInvitation.OrganizationID)
+	org, _, err := h.configstoreClient.GetOrg(ctx, orgInvitation.OrganizationID)
 	if err != nil {
-		return err
+		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to get org %s", orgInvitation.OrganizationID))
 	}
 
-	isOrgOwner, err := h.IsOrgOwner(ctx, org.ID)
+	isOrgOwner, err := h.IsAuthUserOrgOwner(ctx, org.ID)
 	if err != nil {
 		return util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "failed to determine ownership"))
 	}
