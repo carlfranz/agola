@@ -23,7 +23,6 @@ import (
 
 	gitsource "agola.io/agola/internal/gitsources"
 	"agola.io/agola/internal/services/gateway/action"
-	"agola.io/agola/internal/services/gateway/common"
 	"agola.io/agola/internal/util"
 	csclient "agola.io/agola/services/configstore/client"
 	gwapitypes "agola.io/agola/services/gateway/api/types"
@@ -49,36 +48,36 @@ func NewUserRemoteReposHandler(log zerolog.Logger, ah *action.ActionHandler, con
 }
 
 func (h *UserRemoteReposHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *UserRemoteReposHandler) do(r *http.Request) ([]*gwapitypes.RemoteRepoResponse, error) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	remoteSourceRef := vars["remotesourceref"]
 
-	userID := common.CurrentUserID(ctx)
-	if userID == "" {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Errorf("user not authenticated")))
-		return
-	}
-
-	gitsource, _, _, err := h.ah.GetUserGitSource(ctx, remoteSourceRef, userID)
+	gitsource, _, _, err := h.ah.GetCurrentUserGitSource(ctx, remoteSourceRef)
 	if err != nil {
-		util.HTTPError(w, err)
-		h.log.Err(err).Send()
-		return
+		return nil, errors.WithStack(err)
 	}
 
 	remoteRepos, err := gitsource.ListUserRepos()
 	if err != nil {
-		err := util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "failed to get user repositories from git source"))
-		util.HTTPError(w, err)
-		h.log.Err(err).Send()
-		return
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err, util.WithAPIErrorMsg("failed to get user repositories from git source"))
 	}
 
 	repos := make([]*gwapitypes.RemoteRepoResponse, len(remoteRepos))
 	for i, r := range remoteRepos {
 		repos[i] = createRemoteRepoResponse(r)
 	}
-	if err := util.HTTPResponse(w, http.StatusOK, repos); err != nil {
-		h.log.Err(err).Send()
-	}
+
+	return repos, nil
 }

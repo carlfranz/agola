@@ -7,7 +7,7 @@ FROM $AGOLAWEB_IMAGE as agola-web
 #######
 
 # base build image
-FROM golang:1.21-bookworm AS build_base
+FROM golang:1.22-bookworm AS build_base
 
 WORKDIR /agola
 
@@ -34,7 +34,7 @@ RUN make WEBBUNDLE=1 WEBDISTPATH=/agola-web/dist
 #######
 ####### Build the final image
 #######
-FROM debian:buster AS agola
+FROM debian:bookworm AS agola
 
 WORKDIR /
 
@@ -56,7 +56,8 @@ FROM agola as agolademo
 
 WORKDIR /
 
-# copy the example config
-COPY examples/agolademo/config.yml .
+SHELL ["/bin/bash", "-c"]
+
+RUN mkdir -p /data/agola/{configstore,runservice,executor,notification,gitserver}
 
 ENTRYPOINT ["/bin/agola"]

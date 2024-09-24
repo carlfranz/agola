@@ -16,6 +16,8 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/sorintlab/errors"
@@ -182,6 +184,14 @@ type Executor struct {
 	ActiveTasksLimit int `yaml:"activeTasksLimit"`
 
 	AllowPrivilegedContainers bool `yaml:"allowPrivilegedContainers"`
+
+	// docker specific configuration
+	Docker DockerExecutor `yaml:"docker"`
+}
+
+type DockerExecutor struct {
+	// docker network to use when creating containers
+	Network string `yaml:"network"`
 }
 
 type InitImage struct {
@@ -505,6 +515,12 @@ func validateDB(db *DB) error {
 		return errors.Errorf("db connection string undefined")
 	}
 
+	if db.Type == sql.Sqlite3 {
+		if !filepath.IsAbs(db.ConnString) {
+			return errors.Errorf("sqlite3 db connection string must be an absolute path")
+		}
+	}
+
 	return nil
 }
 
@@ -557,7 +573,7 @@ func Validate(c *Config, componentsNames []string) error {
 			return errors.Errorf("gateway runserviceURL is empty")
 		}
 		if err := validateCookieSigning(&c.Gateway.CookieSigning); err != nil {
-			return errors.Wrap(err, "cookie signing configuration error")
+			return errors.Wrap(err, "gateway cookie signing configuration error")
 		}
 		if err := validateWeb(&c.Gateway.Web); err != nil {
 			return errors.Wrapf(err, "gateway web configuration error")
@@ -569,8 +585,8 @@ func Validate(c *Config, componentsNames []string) error {
 
 	// Configstore
 	if isComponentEnabled(componentsNames, "configstore") {
-		if err := validateDB(&c.Runservice.DB); err != nil {
-			return errors.Wrapf(err, "db configuration error")
+		if err := validateDB(&c.Configstore.DB); err != nil {
+			return errors.Wrapf(err, "configstore db configuration error")
 		}
 		if c.Configstore.DataDir == "" {
 			return errors.Errorf("configstore dataDir is empty")
@@ -583,7 +599,7 @@ func Validate(c *Config, componentsNames []string) error {
 	// Runservice
 	if isComponentEnabled(componentsNames, "runservice") {
 		if err := validateDB(&c.Runservice.DB); err != nil {
-			return errors.Wrapf(err, "db configuration error")
+			return errors.Wrapf(err, "runservice db configuration error")
 		}
 		if c.Runservice.DataDir == "" {
 			return errors.Errorf("runservice dataDir is empty")
@@ -599,7 +615,7 @@ func Validate(c *Config, componentsNames []string) error {
 			return errors.Errorf("executor dataDir is empty")
 		}
 		if c.Executor.ToolboxPath == "" {
-			return errors.Errorf("git server toolboxPath is empty")
+			return errors.Errorf("executor toolboxPath is empty")
 		}
 		if c.Executor.RunserviceURL == "" {
 			return errors.Errorf("executor runserviceURL is empty")
@@ -628,6 +644,9 @@ func Validate(c *Config, componentsNames []string) error {
 
 	// Notification
 	if isComponentEnabled(componentsNames, "notification") {
+		if err := validateDB(&c.Notification.DB); err != nil {
+			return errors.Wrapf(err, "notification db configuration error")
+		}
 		if c.Notification.WebExposedURL == "" {
 			return errors.Errorf("notification webExposedURL is empty")
 		}
@@ -642,7 +661,7 @@ func Validate(c *Config, componentsNames []string) error {
 	// Git server
 	if isComponentEnabled(componentsNames, "gitserver") {
 		if c.Gitserver.DataDir == "" {
-			return errors.Errorf("git server dataDir is empty")
+			return errors.Errorf("gitserver dataDir is empty")
 		}
 	}
 
@@ -650,8 +669,8 @@ func Validate(c *Config, componentsNames []string) error {
 }
 
 func isComponentEnabled(componentsNames []string, name string) bool {
-	if util.StringInSlice(componentsNames, "all-base") && name != "executor" {
+	if slices.Contains(componentsNames, "all-base") && name != "executor" {
 		return true
 	}
-	return util.StringInSlice(componentsNames, name)
+	return slices.Contains(componentsNames, name)
 }

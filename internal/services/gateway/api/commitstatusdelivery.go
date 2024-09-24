@@ -16,6 +16,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog"
@@ -63,7 +64,10 @@ func (h *ProjectCommitStatusDeliveries) do(w http.ResponseWriter, r *http.Reques
 	query := r.URL.Query()
 
 	vars := mux.Vars(r)
-	projectRef := vars["projectref"]
+	projectRef, err := url.PathUnescape(vars["projectref"])
+	if err != nil {
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
+	}
 
 	ropts, err := parseRequestOptions(r)
 	if err != nil {
@@ -73,7 +77,7 @@ func (h *ProjectCommitStatusDeliveries) do(w http.ResponseWriter, r *http.Reques
 	deliveryStatusFilter := query["deliverystatus"]
 
 	if ropts.Cursor != "" && len(deliveryStatusFilter) > 0 {
-		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("only one of cursor or deliverystatus should be provided"))
+		return nil, util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("only one of cursor or deliverystatus should be provided"))
 	}
 
 	areq := &action.GetProjectCommitStatusDeliveriesRequest{
@@ -109,29 +113,28 @@ func NewProjectCommitStatusRedeliveryHandler(log zerolog.Logger, ah *action.Acti
 }
 
 func (h *ProjectCommitStatusRedelivery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	err := h.do(w, r)
+	err := h.do(r)
 	if util.HTTPError(w, err) {
 		h.log.Err(err).Send()
 		return
 	}
-
-	if err := util.HTTPResponse(w, http.StatusOK, nil); err != nil {
-		h.log.Err(err).Send()
-	}
 }
 
-func (h *ProjectCommitStatusRedelivery) do(w http.ResponseWriter, r *http.Request) error {
+func (h *ProjectCommitStatusRedelivery) do(r *http.Request) error {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
-	projectRef := vars["projectref"]
+	projectRef, err := url.PathUnescape(vars["projectref"])
+	if err != nil {
+		return util.NewAPIErrorWrap(util.ErrBadRequest, err)
+	}
 	commitStatusDeliveryID := vars["commitstatusdeliveryid"]
 
 	areq := &action.ProjectCommitStatusRedeliveryRequest{
 		ProjectRef:             projectRef,
 		CommitStatusDeliveryID: commitStatusDeliveryID,
 	}
-	err := h.ah.ProjectCommitStatusRedelivery(ctx, areq)
+	err = h.ah.ProjectCommitStatusRedelivery(ctx, areq)
 	if err != nil {
 		return errors.WithStack(err)
 	}

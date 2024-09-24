@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/gofrs/uuid"
 	"gotest.tools/assert"
 	"gotest.tools/assert/cmp"
@@ -41,7 +41,7 @@ func TestDockerPod(t *testing.T) {
 
 	initImage := "busybox:stable"
 
-	d, err := NewDockerDriver(log, "executorid01", toolboxPath, initImage, nil)
+	d, err := NewDockerDriver(log, "executorid01", toolboxPath, initImage)
 	testutil.NilError(t, err)
 
 	ctx := context.Background()
@@ -286,7 +286,7 @@ func TestDockerPod(t *testing.T) {
 
 		// delete the first container
 		dp := pod.(*DockerPod)
-		err = dp.client.ContainerRemove(ctx, dp.containers[0].ID, types.ContainerRemoveOptions{Force: true})
+		err = dp.client.ContainerRemove(ctx, dp.containers[0].ID, container.RemoveOptions{Force: true})
 		testutil.NilError(t, err)
 
 		pods, err := d.GetPods(ctx, true)

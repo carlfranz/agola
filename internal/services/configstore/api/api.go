@@ -20,8 +20,8 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/sorintlab/errors"
 
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/configstore/types"
 )
@@ -34,7 +34,7 @@ func GetObjectKindRef(r *http.Request) (types.ObjectKind, string, error) {
 	vars := mux.Vars(r)
 	projectRef, err := url.PathUnescape(vars["projectref"])
 	if err != nil {
-		return "", "", util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "wrong projectref %q", vars["projectref"]))
+		return "", "", util.NewAPIErrorWrap(util.ErrBadRequest, err, util.WithAPIErrorMsg("wrong projectref %q", vars["projectref"]))
 	}
 	if projectRef != "" {
 		return types.ObjectKindProject, projectRef, nil
@@ -42,13 +42,13 @@ func GetObjectKindRef(r *http.Request) (types.ObjectKind, string, error) {
 
 	projectGroupRef, err := url.PathUnescape(vars["projectgroupref"])
 	if err != nil {
-		return "", "", util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "wrong projectgroupref %q", vars["projectgroupref"]))
+		return "", "", util.NewAPIErrorWrap(util.ErrBadRequest, err, util.WithAPIErrorMsg("wrong projectgroupref %q", vars["projectgroupref"]))
 	}
 	if projectGroupRef != "" {
 		return types.ObjectKindProjectGroup, projectGroupRef, nil
 	}
 
-	return "", "", util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot get project or projectgroup ref"))
+	return "", "", util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("cannot get project or projectgroup ref"))
 }
 
 type requestOptions struct {
@@ -65,11 +65,11 @@ func parseRequestOptions(r *http.Request) (*requestOptions, error) {
 		var err error
 		limit, err = strconv.Atoi(limitS)
 		if err != nil {
-			return nil, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse limit"))
+			return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err, util.WithAPIErrorMsg("cannot parse limit"), serrors.InvalidLimit())
 		}
 	}
 	if limit < 0 {
-		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("limit must be greater or equal than 0"))
+		return nil, util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("limit must be greater or equal than 0"), serrors.InvalidLimit())
 	}
 
 	sortDirection := types.SortDirection(query.Get("sortdirection"))
@@ -78,7 +78,7 @@ func parseRequestOptions(r *http.Request) (*requestOptions, error) {
 		case types.SortDirectionAsc:
 		case types.SortDirectionDesc:
 		default:
-			return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("wrong sort direction %q", sortDirection))
+			return nil, util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("wrong sort direction %q", sortDirection), serrors.InvalidSortDirection())
 		}
 	}
 

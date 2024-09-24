@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	MaxCommitStatusDeliveriesQueryLimit = 40
+	maxCommitStatusDeliveriesQueryLimit = 40
 	CommitStatusDeliveriesLockKey       = "commitstatusdeliveryevents"
 
 	// commitstatusDeliveriesInterval is the time to wait between every commitStatusDeliveriesHandler call.
@@ -71,7 +71,7 @@ func (n *NotificationService) commitStatusDeliveriesHandler(ctx context.Context)
 
 		err := n.d.Do(ctx, func(tx *sql.Tx) error {
 			var err error
-			commitStatusDeliveries, err = n.d.GetProjectCommitStatusDeliveriesAfterSequenceByProjectID(tx, curCommitStatusDeliverySequence, "", []types.DeliveryStatus{types.DeliveryStatusNotDelivered}, MaxCommitStatusDeliveriesQueryLimit, types.SortDirectionAsc)
+			commitStatusDeliveries, err = n.d.GetProjectCommitStatusDeliveriesAfterSequenceByProjectID(tx, curCommitStatusDeliverySequence, "", []types.DeliveryStatus{types.DeliveryStatusNotDelivered}, maxCommitStatusDeliveriesQueryLimit, types.SortDirectionAsc)
 			if err != nil {
 				return errors.WithStack(err)
 			}
@@ -90,7 +90,7 @@ func (n *NotificationService) commitStatusDeliveriesHandler(ctx context.Context)
 			curCommitStatusDeliverySequence = c.Sequence
 		}
 
-		if len(commitStatusDeliveries) < MaxCommitStatusDeliveriesQueryLimit {
+		if len(commitStatusDeliveries) < maxCommitStatusDeliveriesQueryLimit {
 			return nil
 		}
 	}
@@ -133,7 +133,7 @@ func (n *NotificationService) handleCommitStatusDelivery(ctx context.Context, co
 
 	var deliveredAt *time.Time
 	if delivered {
-		deliveredAt = util.TimeP(time.Now())
+		deliveredAt = util.Ptr(time.Now())
 	}
 
 	err = n.d.Do(ctx, func(tx *sql.Tx) error {

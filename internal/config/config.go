@@ -241,7 +241,7 @@ func (s *Steps) UnmarshalJSON(b []byte) error {
 					return errors.WithStack(err)
 				}
 				if s.Tty == nil {
-					s.Tty = util.BoolP(true)
+					s.Tty = util.Ptr(true)
 				}
 				s.Type = stepType
 				step = &s
@@ -873,7 +873,11 @@ func checkConfig(config *Config) error {
 	}
 
 	// Set defaults
-	for _, registryAuth := range config.DockerRegistriesAuth {
+	for raName, registryAuth := range config.DockerRegistriesAuth {
+		if registryAuth == nil {
+			return errors.Errorf("docker registries auth %q is empty", raName)
+		}
+
 		if registryAuth.Type == "" {
 			registryAuth.Type = DockerRegistryAuthTypeBasic
 		}
@@ -881,14 +885,23 @@ func checkConfig(config *Config) error {
 
 	for _, run := range config.Runs {
 		// set auth type to basic if not specified
-		for _, registryAuth := range run.DockerRegistriesAuth {
+		for raName, registryAuth := range run.DockerRegistriesAuth {
+			if registryAuth == nil {
+				return errors.Errorf("run %q, docker registries auth %q is empty", run.Name, raName)
+			}
+
 			if registryAuth.Type == "" {
 				registryAuth.Type = DockerRegistryAuthTypeBasic
 			}
 		}
 		for _, task := range run.Tasks {
 			// set auth type to basic if not specified
-			for _, registryAuth := range task.DockerRegistriesAuth {
+			for raName, registryAuth := range task.DockerRegistriesAuth {
+				if registryAuth == nil {
+					return errors.Errorf("run %q, task %q, docker registries auth %q is empty", run.Name, task.Name, raName)
+
+				}
+
 				if registryAuth.Type == "" {
 					registryAuth.Type = DockerRegistryAuthTypeBasic
 				}
@@ -926,7 +939,7 @@ func checkConfig(config *Config) error {
 					}
 					// if tty is omitted its default is true
 					if step.Tty == nil {
-						step.Tty = util.BoolP(true)
+						step.Tty = util.Ptr(true)
 					}
 				case *SaveCacheStep:
 					for _, content := range step.Contents {

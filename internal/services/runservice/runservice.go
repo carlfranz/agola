@@ -18,6 +18,8 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -76,7 +78,7 @@ func (s *Runservice) maintenanceModeWatcher(ctx context.Context, runCtxCancel co
 type Runservice struct {
 	log             zerolog.Logger
 	c               *config.Runservice
-	ost             *objectstorage.ObjStorage
+	ost             objectstorage.ObjStorage
 	d               *db.DB
 	lf              lock.LockFactory
 	ah              *action.ActionHandler
@@ -88,7 +90,17 @@ func NewRunservice(ctx context.Context, log zerolog.Logger, c *config.Runservice
 		log = log.Level(zerolog.DebugLevel)
 	}
 
-	ost, err := scommon.NewObjectStorage(&c.ObjectStorage)
+	if err := os.MkdirAll(c.DataDir, 0770); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	if c.DB.Type == sql.Sqlite3 {
+		if err := os.MkdirAll(filepath.Dir(c.DB.ConnString), 0770); err != nil {
+			return nil, errors.WithStack(err)
+		}
+	}
+
+	ost, err := scommon.NewObjectStorage(ctx, &c.ObjectStorage)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -159,7 +171,7 @@ func (s *Runservice) setupDefaultRouter(etCh chan string) http.Handler {
 	runByGroupHandler := api.NewRunByGroupHandler(s.log, s.d, s.ah)
 	runTaskActionsHandler := api.NewRunTaskActionsHandler(s.log, s.ah)
 	runsHandler := api.NewRunsHandler(s.log, s.d, s.ah)
-	runsByGroupHandler := api.NewRunsByGroupHandler(s.log, s.d, s.ah)
+	runsByGroupHandler := api.NewGroupRunsHandler(s.log, s.d, s.ah)
 	runActionsHandler := api.NewRunActionsHandler(s.log, s.ah)
 	runCreateHandler := api.NewRunCreateHandler(s.log, s.ah)
 	runEventsHandler := api.NewRunEventsHandler(s.log, s.d, s.ost)

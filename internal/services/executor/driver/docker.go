@@ -15,6 +15,7 @@
 package driver
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -22,7 +23,7 @@ import (
 	"io"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ import (
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	dockertypesimage "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
@@ -50,23 +52,43 @@ type DockerDriver struct {
 	initDockerConfig *registry.DockerConfig
 	executorID       string
 	arch             types.Arch
+	network          string
 }
 
-func NewDockerDriver(log zerolog.Logger, executorID, toolboxPath, initImage string, initDockerConfig *registry.DockerConfig) (*DockerDriver, error) {
+type DockerDriverCreateOption func(*DockerDriver)
+
+func WithDockerDriverNetwork(network string) func(*DockerDriver) {
+	return func(d *DockerDriver) {
+		d.network = network
+	}
+}
+
+func WithDockerDriverInitDockerConfig(initDockerConfig *registry.DockerConfig) func(*DockerDriver) {
+	return func(d *DockerDriver) {
+		d.initDockerConfig = initDockerConfig
+	}
+}
+
+func NewDockerDriver(log zerolog.Logger, executorID, toolboxPath, initImage string, opts ...DockerDriverCreateOption) (*DockerDriver, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithVersion("1.26"))
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	return &DockerDriver{
-		log:              log,
-		client:           cli,
-		toolboxPath:      toolboxPath,
-		initImage:        initImage,
-		initDockerConfig: initDockerConfig,
-		executorID:       executorID,
-		arch:             types.ArchFromString(runtime.GOARCH),
-	}, nil
+	d := &DockerDriver{
+		log:         log,
+		client:      cli,
+		toolboxPath: toolboxPath,
+		initImage:   initImage,
+		executorID:  executorID,
+		arch:        types.ArchFromString(runtime.GOARCH),
+	}
+
+	for _, o := range opts {
+		o(d)
+	}
+
+	return d, nil
 }
 
 func (d *DockerDriver) Setup(ctx context.Context) error {
@@ -100,7 +122,7 @@ func (d *DockerDriver) createToolboxVolume(ctx context.Context, podID string, ou
 
 	containerID := resp.ID
 
-	if err := d.client.ContainerStart(ctx, containerID, dockertypes.ContainerStartOptions{}); err != nil {
+	if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		return nil, errors.WithStack(err)
 	}
 
@@ -130,7 +152,7 @@ func (d *DockerDriver) createToolboxVolume(ctx context.Context, podID string, ou
 	}
 
 	// ignore remove error
-	_ = d.client.ContainerRemove(ctx, containerID, dockertypes.ContainerRemoveOptions{Force: true})
+	_ = d.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 
 	return &toolboxVol, nil
 }
@@ -163,7 +185,7 @@ func (d *DockerDriver) NewPod(ctx context.Context, podConfig *PodConfig, out io.
 			mainContainerID = containerID
 		}
 
-		if err := d.client.ContainerStart(ctx, containerID, dockertypes.ContainerStartOptions{}); err != nil {
+		if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 			return nil, errors.WithStack(err)
 		}
 	}
@@ -179,7 +201,7 @@ func (d *DockerDriver) NewPod(ctx context.Context, podConfig *PodConfig, out io.
 	}
 
 	containers, err := d.client.ContainerList(ctx,
-		dockertypes.ContainerListOptions{
+		container.ListOptions{
 			Filters: args,
 		})
 	if err != nil {
@@ -227,7 +249,7 @@ func (d *DockerDriver) NewPod(ctx context.Context, podConfig *PodConfig, out io.
 		return nil, errors.Errorf("expected %d containers but got %d", len(containers), count)
 	}
 	// put the containers in the right order based on their container index
-	sort.Sort(ContainerSlice(pod.containers))
+	slices.SortFunc(pod.containers, ContainersByIndexSortFunc)
 
 	return pod, nil
 }
@@ -256,7 +278,7 @@ func (d *DockerDriver) fetchImage(ctx context.Context, image string, alwaysFetch
 
 	args := filters.NewArgs()
 	args.Add("reference", image)
-	img, err := d.client.ImageList(ctx, dockertypes.ImageListOptions{Filters: args})
+	img, err := d.client.ImageList(ctx, dockertypesimage.ListOptions{Filters: args})
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -264,7 +286,7 @@ func (d *DockerDriver) fetchImage(ctx context.Context, image string, alwaysFetch
 
 	// fetch only if forced, is latest tag or image doesn't exist
 	if alwaysFetch || tag == "latest" || !exists {
-		reader, err := d.client.ImagePull(ctx, image, dockertypes.ImagePullOptions{RegistryAuth: registryAuthEnc})
+		reader, err := d.client.ImagePull(ctx, image, dockertypesimage.PullOptions{RegistryAuth: registryAuthEnc})
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -314,6 +336,7 @@ func (d *DockerDriver) createContainer(ctx context.Context, index int, podConfig
 		// TODO(sgotti) migrate this to cliHostConfig.Mounts
 		cliHostConfig.Binds = []string{fmt.Sprintf("%s:%s", toolboxVol.Name, podConfig.InitVolumeDir)}
 		cliHostConfig.ReadonlyPaths = []string{fmt.Sprintf("%s:%s", toolboxVol.Name, podConfig.InitVolumeDir)}
+		cliHostConfig.NetworkMode = container.NetworkMode(d.network)
 	} else {
 		// attach other containers to maincontainer network
 		cliHostConfig.NetworkMode = container.NetworkMode(fmt.Sprintf("container:%s", maincontainerID))
@@ -355,7 +378,7 @@ func (d *DockerDriver) GetPods(ctx context.Context, all bool) ([]Pod, error) {
 	args := filters.NewArgs()
 
 	containers, err := d.client.ContainerList(ctx,
-		dockertypes.ContainerListOptions{
+		container.ListOptions{
 			Filters: args,
 			All:     all,
 		})
@@ -460,7 +483,8 @@ func (d *DockerDriver) GetPods(ctx context.Context, all bool) ([]Pod, error) {
 	pods := make([]Pod, 0, len(podsMap))
 	for _, pod := range podsMap {
 		// put the containers in the right order based on their container index
-		sort.Sort(ContainerSlice(pod.containers))
+		slices.SortFunc(pod.containers, ContainersByIndexSortFunc)
+
 		pods = append(pods, pod)
 	}
 	return pods, nil
@@ -482,11 +506,9 @@ type DockerContainer struct {
 	dockertypes.Container
 }
 
-type ContainerSlice []*DockerContainer
-
-func (p ContainerSlice) Len() int           { return len(p) }
-func (p ContainerSlice) Less(i, j int) bool { return p[i].Index < p[j].Index }
-func (p ContainerSlice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+func ContainersByIndexSortFunc(a, b *DockerContainer) int {
+	return cmp.Compare(a.Index, b.Index)
+}
 
 func (dp *DockerPod) ID() string {
 	return dp.id
@@ -516,8 +538,8 @@ func (dp *DockerPod) Stop(ctx context.Context) error {
 
 func (dp *DockerPod) Remove(ctx context.Context) error {
 	errs := []error{}
-	for _, container := range dp.containers {
-		if err := dp.client.ContainerRemove(ctx, container.ID, dockertypes.ContainerRemoveOptions{Force: true}); err != nil {
+	for _, c := range dp.containers {
+		if err := dp.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
 			errs = append(errs, err)
 		}
 	}

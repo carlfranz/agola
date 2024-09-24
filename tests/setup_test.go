@@ -84,12 +84,11 @@ const (
 	ConfigFormatStarlark ConfigFormat = "starlark"
 )
 
-const (
-	remoteErrorInternal     = "remote error internal"
-	remoteErrorNotExist     = "remote error notexist"
-	remoteErrorBadRequest   = "remote error badrequest"
-	remoteErrorUnauthorized = "remote error unauthorized"
-	remoteErrorForbidden    = "remote error forbidden"
+var (
+	remoteErrorInternal     = util.NewRemoteError(util.ErrInternal)
+	remoteErrorBadRequest   = util.NewRemoteError(util.ErrBadRequest)
+	remoteErrorUnauthorized = util.NewRemoteError(util.ErrUnauthorized)
+	remoteErrorForbidden    = util.NewRemoteError(util.ErrForbidden)
 )
 
 const MaxLimit = 30
@@ -143,6 +142,13 @@ const FailingRunConfig = `
 	],
 }
 `
+
+type RefType int
+
+const (
+	RefTypeID RefType = iota
+	RefTypePath
+)
 
 func setupGitea(t *testing.T, dir, dockerBridgeAddress string) *testutil.TestGitea {
 	tgitea, err := testutil.NewTestGitea(t, dir, dockerBridgeAddress)

@@ -27,7 +27,9 @@ linters-settings:
       - .WithMessage(
       - .WithMessagef(
       - .WithStack(
-      - .NewDetailedError(
+      - .NewAPIError(
+      - .NewAPIErrorWrap(
+      - .APIErrorFromRemoteError(
     ignoreSigRegexps:
       - \.New.*Error\(
     ignorePackageGlobs:

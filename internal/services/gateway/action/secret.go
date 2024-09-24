@@ -20,6 +20,7 @@ import (
 	"github.com/sorintlab/errors"
 
 	"agola.io/agola/internal/services/common"
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
 	cstypes "agola.io/agola/services/configstore/types"
@@ -43,7 +44,7 @@ func (h *ActionHandler) GetSecrets(ctx context.Context, req *GetSecretsRequest) 
 		cssecrets, _, err = h.configstoreClient.GetProjectSecrets(ctx, req.ParentRef, req.Tree)
 	}
 	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), err)
+		return nil, APIErrorFromRemoteError(err)
 	}
 
 	if req.RemoveOverridden {
@@ -76,11 +77,11 @@ func (h *ActionHandler) CreateSecret(ctx context.Context, req *CreateSecretReque
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
 	if !isVariableOwner {
-		return nil, util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
+		return nil, util.NewAPIError(util.ErrForbidden, util.WithAPIErrorMsg("user not authorized"))
 	}
 
 	if !util.ValidateName(req.Name) {
-		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid secret name %q", req.Name))
+		return nil, util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid secret name %q", req.Name), serrors.InvalidSecretName())
 	}
 
 	creq := &csapitypes.CreateUpdateSecretRequest{
@@ -99,7 +100,7 @@ func (h *ActionHandler) CreateSecret(ctx context.Context, req *CreateSecretReque
 		rs, _, err = h.configstoreClient.CreateProjectSecret(ctx, req.ParentRef, creq)
 	}
 	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to create secret"))
+		return nil, APIErrorFromRemoteError(err, util.WithAPIErrorMsg("failed to create secret"))
 	}
 	h.log.Info().Msgf("secret %s created, ID: %s", rs.Name, rs.ID)
 
@@ -130,11 +131,11 @@ func (h *ActionHandler) UpdateSecret(ctx context.Context, req *UpdateSecretReque
 		return nil, errors.Wrapf(err, "failed to determine ownership")
 	}
 	if !isVariableOwner {
-		return nil, util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
+		return nil, util.NewAPIError(util.ErrForbidden, util.WithAPIErrorMsg("user not authorized"))
 	}
 
 	if !util.ValidateName(req.Name) {
-		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid secret name %q", req.Name))
+		return nil, util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid secret name %q", req.Name), serrors.InvalidSecretName())
 	}
 
 	creq := &csapitypes.CreateUpdateSecretRequest{
@@ -153,7 +154,7 @@ func (h *ActionHandler) UpdateSecret(ctx context.Context, req *UpdateSecretReque
 		rs, _, err = h.configstoreClient.UpdateProjectSecret(ctx, req.ParentRef, req.SecretName, creq)
 	}
 	if err != nil {
-		return nil, util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to update secret"))
+		return nil, APIErrorFromRemoteError(err, util.WithAPIErrorMsg("failed to update secret"))
 	}
 	h.log.Info().Msgf("secret %s updated, ID: %s", rs.Name, rs.ID)
 
@@ -166,7 +167,7 @@ func (h *ActionHandler) DeleteSecret(ctx context.Context, parentType cstypes.Obj
 		return errors.Wrapf(err, "failed to determine ownership")
 	}
 	if !isVariableOwner {
-		return util.NewAPIError(util.ErrForbidden, errors.Errorf("user not authorized"))
+		return util.NewAPIError(util.ErrForbidden, util.WithAPIErrorMsg("user not authorized"))
 	}
 
 	switch parentType {
@@ -178,7 +179,7 @@ func (h *ActionHandler) DeleteSecret(ctx context.Context, parentType cstypes.Obj
 		_, err = h.configstoreClient.DeleteProjectSecret(ctx, parentRef, name)
 	}
 	if err != nil {
-		return util.NewAPIError(util.KindFromRemoteError(err), errors.Wrapf(err, "failed to delete secret"))
+		return APIErrorFromRemoteError(err, util.WithAPIErrorMsg("failed to delete secret"))
 	}
 	return nil
 }

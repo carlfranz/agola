@@ -18,6 +18,8 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -77,7 +79,7 @@ func (s *Configstore) maintenanceModeWatcher(ctx context.Context, runCtxCancel c
 type Configstore struct {
 	log             zerolog.Logger
 	c               *config.Configstore
-	ost             *objectstorage.ObjStorage
+	ost             objectstorage.ObjStorage
 	d               *db.DB
 	lf              lock.LockFactory
 	ah              *action.ActionHandler
@@ -89,7 +91,17 @@ func NewConfigstore(ctx context.Context, log zerolog.Logger, c *config.Configsto
 		log = log.Level(zerolog.DebugLevel)
 	}
 
-	ost, err := scommon.NewObjectStorage(&c.ObjectStorage)
+	if err := os.MkdirAll(c.DataDir, 0770); err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	if c.DB.Type == sql.Sqlite3 {
+		if err := os.MkdirAll(filepath.Dir(c.DB.ConnString), 0770); err != nil {
+			return nil, errors.WithStack(err)
+		}
+	}
+
+	ost, err := scommon.NewObjectStorage(ctx, &c.ObjectStorage)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -141,30 +153,30 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	exportHandler := api.NewExportHandler(s.log, s.ah)
 	importHandler := api.NewImportHandler(s.log, s.ah)
 
-	projectGroupHandler := api.NewProjectGroupHandler(s.log, s.ah, s.d)
-	projectGroupSubgroupsHandler := api.NewProjectGroupSubgroupsHandler(s.log, s.ah, s.d)
-	projectGroupProjectsHandler := api.NewProjectGroupProjectsHandler(s.log, s.ah, s.d)
-	createProjectGroupHandler := api.NewCreateProjectGroupHandler(s.log, s.ah, s.d)
-	updateProjectGroupHandler := api.NewUpdateProjectGroupHandler(s.log, s.ah, s.d)
+	projectGroupHandler := api.NewProjectGroupHandler(s.log, s.ah)
+	projectGroupSubgroupsHandler := api.NewProjectGroupSubgroupsHandler(s.log, s.ah)
+	projectGroupProjectsHandler := api.NewProjectGroupProjectsHandler(s.log, s.ah)
+	createProjectGroupHandler := api.NewCreateProjectGroupHandler(s.log, s.ah)
+	updateProjectGroupHandler := api.NewUpdateProjectGroupHandler(s.log, s.ah)
 	deleteProjectGroupHandler := api.NewDeleteProjectGroupHandler(s.log, s.ah)
 
-	projectHandler := api.NewProjectHandler(s.log, s.ah, s.d)
-	createProjectHandler := api.NewCreateProjectHandler(s.log, s.ah, s.d)
-	updateProjectHandler := api.NewUpdateProjectHandler(s.log, s.ah, s.d)
+	projectHandler := api.NewProjectHandler(s.log, s.ah)
+	createProjectHandler := api.NewCreateProjectHandler(s.log, s.ah)
+	updateProjectHandler := api.NewUpdateProjectHandler(s.log, s.ah)
 	deleteProjectHandler := api.NewDeleteProjectHandler(s.log, s.ah)
 
-	secretsHandler := api.NewSecretsHandler(s.log, s.ah, s.d)
+	secretsHandler := api.NewSecretsHandler(s.log, s.ah)
 	createSecretHandler := api.NewCreateSecretHandler(s.log, s.ah)
 	updateSecretHandler := api.NewUpdateSecretHandler(s.log, s.ah)
 	deleteSecretHandler := api.NewDeleteSecretHandler(s.log, s.ah)
 
-	variablesHandler := api.NewVariablesHandler(s.log, s.ah, s.d)
+	variablesHandler := api.NewVariablesHandler(s.log, s.ah)
 	createVariableHandler := api.NewCreateVariableHandler(s.log, s.ah)
 	updateVariableHandler := api.NewUpdateVariableHandler(s.log, s.ah)
 	deleteVariableHandler := api.NewDeleteVariableHandler(s.log, s.ah)
 
-	userHandler := api.NewUserHandler(s.log, s.d)
-	usersHandler := api.NewUsersHandler(s.log, s.d, s.ah)
+	userHandler := api.NewUserHandler(s.log, s.ah)
+	usersHandler := api.NewUsersHandler(s.log, s.ah)
 	createUserHandler := api.NewCreateUserHandler(s.log, s.ah)
 	updateUserHandler := api.NewUpdateUserHandler(s.log, s.ah)
 	deleteUserHandler := api.NewDeleteUserHandler(s.log, s.ah)
@@ -183,7 +195,7 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	userOrgHandler := api.NewUserOrgHandler(s.log, s.ah)
 	userOrgsHandler := api.NewUserOrgsHandler(s.log, s.ah)
 
-	orgHandler := api.NewOrgHandler(s.log, s.d)
+	orgHandler := api.NewOrgHandler(s.log, s.ah)
 	orgsHandler := api.NewOrgsHandler(s.log, s.ah)
 	createOrgHandler := api.NewCreateOrgHandler(s.log, s.ah)
 	updateOrgHandler := api.NewUpdateOrgHandler(s.log, s.ah)
@@ -194,13 +206,13 @@ func (s *Configstore) setupDefaultRouter() http.Handler {
 	addOrgMemberHandler := api.NewAddOrgMemberHandler(s.log, s.ah)
 	removeOrgMemberHandler := api.NewRemoveOrgMemberHandler(s.log, s.ah)
 
-	remoteSourceHandler := api.NewRemoteSourceHandler(s.log, s.d)
+	remoteSourceHandler := api.NewRemoteSourceHandler(s.log, s.ah)
 	remoteSourcesHandler := api.NewRemoteSourcesHandler(s.log, s.ah)
 	createRemoteSourceHandler := api.NewCreateRemoteSourceHandler(s.log, s.ah)
 	updateRemoteSourceHandler := api.NewUpdateRemoteSourceHandler(s.log, s.ah)
 	deleteRemoteSourceHandler := api.NewDeleteRemoteSourceHandler(s.log, s.ah)
 
-	linkedAccountsHandler := api.NewLinkedAccountsHandler(s.log, s.d)
+	linkedAccountsHandler := api.NewLinkedAccountsHandler(s.log, s.ah)
 
 	createOrgInvitationHandler := api.NewCreateOrgInvitationHandler(s.log, s.ah)
 	deleteOrgInvitationHandler := api.NewDeleteOrgInvitationHandler(s.log, s.ah)

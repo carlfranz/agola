@@ -23,8 +23,6 @@ import (
 	"github.com/sorintlab/errors"
 
 	"agola.io/agola/internal/services/configstore/action"
-	"agola.io/agola/internal/services/configstore/db"
-	"agola.io/agola/internal/sqlg/sql"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
 	"agola.io/agola/services/configstore/types"
@@ -32,38 +30,36 @@ import (
 
 type RemoteSourceHandler struct {
 	log zerolog.Logger
-	d   *db.DB
+	ah  *action.ActionHandler
 }
 
-func NewRemoteSourceHandler(log zerolog.Logger, d *db.DB) *RemoteSourceHandler {
-	return &RemoteSourceHandler{log: log, d: d}
+func NewRemoteSourceHandler(log zerolog.Logger, ah *action.ActionHandler) *RemoteSourceHandler {
+	return &RemoteSourceHandler{log: log, ah: ah}
 }
 
 func (h *RemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *RemoteSourceHandler) do(r *http.Request) (*types.RemoteSource, error) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	rsRef := vars["remotesourceref"]
 
-	var remoteSource *types.RemoteSource
-	err := h.d.Do(ctx, func(tx *sql.Tx) error {
-		var err error
-		remoteSource, err = h.d.GetRemoteSource(tx, rsRef)
-		return errors.WithStack(err)
-	})
+	remoteSource, err := h.ah.GetRemoteSource(ctx, rsRef)
 	if err != nil {
-		h.log.Err(err).Send()
-		util.HTTPError(w, err)
-		return
+		return nil, errors.WithStack(err)
 	}
 
-	if remoteSource == nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrNotExist, errors.Errorf("remote source %q doesn't exist", rsRef)))
-		return
-	}
-
-	if err := util.HTTPResponse(w, http.StatusOK, remoteSource); err != nil {
-		h.log.Err(err).Send()
-	}
+	return remoteSource, nil
 }
 
 type CreateRemoteSourceHandler struct {
@@ -76,13 +72,24 @@ func NewCreateRemoteSourceHandler(log zerolog.Logger, ah *action.ActionHandler) 
 }
 
 func (h *CreateRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusCreated, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *CreateRemoteSourceHandler) do(r *http.Request) (*types.RemoteSource, error) {
 	ctx := r.Context()
 
 	var req *csapitypes.CreateUpdateRemoteSourceRequest
 	d := json.NewDecoder(r.Body)
 	if err := d.Decode(&req); err != nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
-		return
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
 	}
 
 	areq := &action.CreateUpdateRemoteSourceRequest{
@@ -100,14 +107,11 @@ func (h *CreateRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	remoteSource, err := h.ah.CreateRemoteSource(ctx, areq)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusCreated, remoteSource); err != nil {
-		h.log.Err(err).Send()
-	}
+	return remoteSource, nil
 }
 
 type UpdateRemoteSourceHandler struct {
@@ -120,6 +124,18 @@ func NewUpdateRemoteSourceHandler(log zerolog.Logger, ah *action.ActionHandler) 
 }
 
 func (h *UpdateRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusCreated, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *UpdateRemoteSourceHandler) do(r *http.Request) (*types.RemoteSource, error) {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
@@ -128,8 +144,7 @@ func (h *UpdateRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	var req *csapitypes.CreateUpdateRemoteSourceRequest
 	d := json.NewDecoder(r.Body)
 	if err := d.Decode(&req); err != nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
-		return
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
 	}
 
 	areq := &action.CreateUpdateRemoteSourceRequest{
@@ -147,14 +162,11 @@ func (h *UpdateRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	remoteSource, err := h.ah.UpdateRemoteSource(ctx, rsRef, areq)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusCreated, remoteSource); err != nil {
-		h.log.Err(err).Send()
-	}
+	return remoteSource, nil
 }
 
 type DeleteRemoteSourceHandler struct {
@@ -167,18 +179,29 @@ func NewDeleteRemoteSourceHandler(log zerolog.Logger, ah *action.ActionHandler) 
 }
 
 func (h *DeleteRemoteSourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *DeleteRemoteSourceHandler) do(r *http.Request) error {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
 	rsRef := vars["remotesourceref"]
 
 	err := h.ah.DeleteRemoteSource(ctx, rsRef)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
+	if err != nil {
+		return errors.WithStack(err)
 	}
-	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
-		h.log.Err(err).Send()
-	}
+
+	return nil
 }
 
 type RemoteSourcesHandler struct {
@@ -225,47 +248,38 @@ func (h *RemoteSourcesHandler) do(w http.ResponseWriter, r *http.Request) ([]*ty
 
 type LinkedAccountsHandler struct {
 	log zerolog.Logger
-	d   *db.DB
+	ah  *action.ActionHandler
 }
 
-func NewLinkedAccountsHandler(log zerolog.Logger, d *db.DB) *LinkedAccountsHandler {
-	return &LinkedAccountsHandler{log: log, d: d}
+func NewLinkedAccountsHandler(log zerolog.Logger, ah *action.ActionHandler) *LinkedAccountsHandler {
+	return &LinkedAccountsHandler{log: log, ah: ah}
 }
 
 func (h *LinkedAccountsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *LinkedAccountsHandler) do(r *http.Request) ([]*types.LinkedAccount, error) {
 	ctx := r.Context()
 	query := r.URL.Query()
 
 	queryType := query.Get("query_type")
 
-	var linkedAccounts []*types.LinkedAccount
-	err := h.d.Do(ctx, func(tx *sql.Tx) error {
-		switch queryType {
-		case "byremoteuser":
-			remoteUserID := query.Get("remoteuserid")
-			remoteSourceID := query.Get("remotesourceid")
-			la, err := h.d.GetLinkedAccountByRemoteUserIDandSource(tx, remoteUserID, remoteSourceID)
-			if err != nil {
-				return errors.WithStack(err)
-			}
-			if la == nil {
-				return util.NewAPIError(util.ErrNotExist, errors.Errorf("linked account with remote user %q for remote source %q token doesn't exist", remoteUserID, remoteSourceID))
-			}
+	remoteUserID := query.Get("remoteuserid")
+	remoteSourceID := query.Get("remotesourceid")
 
-			linkedAccounts = []*types.LinkedAccount{la}
-		default:
-			return errors.Errorf("unknown query_type: %q", queryType)
-		}
-
-		return nil
-	})
+	linkedAccounts, err := h.ah.GetLinkedAccounts(ctx, &action.GetLinkedAccountsRequest{QueryType: queryType, RemoteUserID: remoteUserID, RemoteSourceID: remoteSourceID})
 	if err != nil {
-		h.log.Err(err).Send()
-		util.HTTPError(w, err)
-		return
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusOK, linkedAccounts); err != nil {
-		h.log.Err(err).Send()
-	}
+	return linkedAccounts, nil
 }

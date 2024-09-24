@@ -16,6 +16,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog"
@@ -64,7 +65,10 @@ func (h *ProjectRunWebhookDeliveries) do(w http.ResponseWriter, r *http.Request)
 	query := r.URL.Query()
 
 	vars := mux.Vars(r)
-	projectRef := vars["projectref"]
+	projectRef, err := url.PathUnescape(vars["projectref"])
+	if err != nil {
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
+	}
 
 	ropts, err := parseRequestOptions(r)
 	if err != nil {
@@ -74,7 +78,7 @@ func (h *ProjectRunWebhookDeliveries) do(w http.ResponseWriter, r *http.Request)
 	deliveryStatusFilter := query["deliverystatus"]
 
 	if ropts.Cursor != "" && len(deliveryStatusFilter) > 0 {
-		return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("only one of cursor or deliverystatus should be provided"))
+		return nil, util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("only one of cursor or deliverystatus should be provided"))
 	}
 
 	areq := &action.GetProjectRunWebhookDeliveriesRequest{
@@ -110,29 +114,28 @@ func NewProjectRunWebhookRedeliveryHandler(log zerolog.Logger, ah *action.Action
 }
 
 func (h *ProjectRunWebhookRedelivery) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	err := h.do(w, r)
+	err := h.do(r)
 	if util.HTTPError(w, err) {
 		h.log.Err(err).Send()
 		return
 	}
-
-	if err := util.HTTPResponse(w, http.StatusOK, nil); err != nil {
-		h.log.Err(err).Send()
-	}
 }
 
-func (h *ProjectRunWebhookRedelivery) do(w http.ResponseWriter, r *http.Request) error {
+func (h *ProjectRunWebhookRedelivery) do(r *http.Request) error {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
-	projectRef := vars["projectref"]
+	projectRef, err := url.PathUnescape(vars["projectref"])
+	if err != nil {
+		return util.NewAPIErrorWrap(util.ErrBadRequest, err)
+	}
 	runWebhookDeliveryID := vars["runwebhookdeliveryid"]
 
 	areq := &action.ProjectRunWebhookRedeliveryRequest{
 		ProjectRef:           projectRef,
 		RunWebhookDeliveryID: runWebhookDeliveryID,
 	}
-	err := h.ah.ProjectRunWebhookRedelivery(ctx, areq)
+	err = h.ah.ProjectRunWebhookRedelivery(ctx, areq)
 	if err != nil {
 		return errors.WithStack(err)
 	}

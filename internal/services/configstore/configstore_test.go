@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,7 @@ import (
 
 	"agola.io/agola/internal/services/config"
 	"agola.io/agola/internal/services/configstore/action"
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/sqlg"
 	"agola.io/agola/internal/sqlg/sql"
 	"agola.io/agola/internal/testutil"
@@ -266,13 +268,14 @@ func TestExportImport(t *testing.T) {
 	err = cs.ah.SetMaintenanceEnabled(ctx, true)
 	testutil.NilError(t, err)
 
-	_ = testutil.Wait(30*time.Second, func() (bool, error) {
+	err = testutil.Wait(30*time.Second, func() (bool, error) {
 		if !cs.ah.IsMaintenanceMode() {
 			return false, nil
 		}
 
 		return true, nil
 	})
+	testutil.NilError(t, err)
 
 	err = cs.ah.Import(ctx, &export)
 	testutil.NilError(t, err)
@@ -280,13 +283,14 @@ func TestExportImport(t *testing.T) {
 	err = cs.ah.SetMaintenanceEnabled(ctx, false)
 	testutil.NilError(t, err)
 
-	_ = testutil.Wait(30*time.Second, func() (bool, error) {
+	err = testutil.Wait(30*time.Second, func() (bool, error) {
 		if cs.ah.IsMaintenanceMode() {
 			return false, nil
 		}
 
 		return true, nil
 	})
+	testutil.NilError(t, err)
 
 	newRemoteSources, err := getRemoteSources(ctx, cs)
 	testutil.NilError(t, err)
@@ -338,7 +342,7 @@ func TestUser(t *testing.T) {
 	})
 
 	t.Run("create duplicated user", func(t *testing.T) {
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("user with name %q already exists", "user01"))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("user with name %q already exists", "user01"), serrors.UserAlreadyExists())
 		_, err := cs.ah.CreateUser(ctx, &action.CreateUserRequest{UserName: "user01"})
 		assert.Error(t, err, expectedErr.Error())
 	})
@@ -372,7 +376,7 @@ func TestUser(t *testing.T) {
 		var user *types.User
 		err = cs.d.Do(ctx, func(tx *sql.Tx) error {
 			var err error
-			user, err = cs.d.GetUser(tx, "user03")
+			user, err = cs.ah.GetUserByRef(tx, "user03")
 			return errors.WithStack(err)
 		})
 		testutil.NilError(t, err)
@@ -428,37 +432,37 @@ func TestProjectGroupsAndProjectsCreate(t *testing.T) {
 
 	t.Run("create duplicated project in user root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName)))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName)), serrors.ProjectAlreadyExists())
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("create duplicated project in org root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, projectName)))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, projectName)), serrors.ProjectAlreadyExists())
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 		assert.Error(t, err, expectedErr.Error())
 	})
 
 	t.Run("create duplicated project in user non root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, "projectgroup01", projectName)))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, "projectgroup01", projectName)), serrors.ProjectAlreadyExists())
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("create duplicated project in org non root project group", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, "projectgroup01", projectName)))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project with name %q, path %q already exists", projectName, path.Join("org", org.Name, "projectgroup01", projectName)), serrors.ProjectAlreadyExists())
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: projectName, Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 		assert.Error(t, err, expectedErr.Error())
 	})
 
 	t.Run("create project in unexistent project group", func(t *testing.T) {
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf(`project group with id "unexistentid" doesn't exist`))
+		expectedErr := util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg(`parent project group with id "unexistentid" doesn't exist`), serrors.ParentProjectGroupDoesNotExist())
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: "unexistentid"}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("create project without parent id specified", func(t *testing.T) {
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project parent id required"))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project parent id required"))
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 		assert.Error(t, err, expectedErr.Error())
 	})
@@ -504,40 +508,40 @@ func TestProjectUpdate(t *testing.T) {
 	_, err = cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "projectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name)}, Visibility: types.VisibilityPublic})
 	testutil.NilError(t, err)
 
-	p01 := &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual}
-	_, err = cs.ah.CreateProject(ctx, p01)
+	p01req := &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual}
+	_, err = cs.ah.CreateProject(ctx, p01req)
 	testutil.NilError(t, err)
 
-	p02 := &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual}
-	_, err = cs.ah.CreateProject(ctx, p02)
+	p02req := &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual}
+	_, err = cs.ah.CreateProject(ctx, p02req)
 	testutil.NilError(t, err)
 
-	p03 := &action.CreateUpdateProjectRequest{Name: "project02", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual}
-	_, err = cs.ah.CreateProject(ctx, p03)
+	p03req := &action.CreateUpdateProjectRequest{Name: "project02", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name, "projectgroup01")}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual}
+	_, err = cs.ah.CreateProject(ctx, p03req)
 	testutil.NilError(t, err)
 
 	t.Run("rename project keeping same parent", func(t *testing.T) {
 		projectName := "project02"
-		p03.Name = "newproject02"
-		_, err := cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "projectgroup01", projectName), p03)
+		p03req.Name = "newproject02"
+		_, err := cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "projectgroup01", projectName), p03req)
 		testutil.NilError(t, err)
 	})
 	t.Run("move project to project group having project with same name", func(t *testing.T) {
 		projectName := "project01"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName)))
-		p02.Parent.ID = path.Join("user", user.Name)
-		_, err := cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "projectgroup01", projectName), p02)
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project with name %q, path %q already exists", projectName, path.Join("user", user.Name, projectName)), serrors.ProjectAlreadyExists())
+		p02req.Parent.ID = path.Join("user", user.Name)
+		_, err := cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "projectgroup01", projectName), p02req)
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("move project to project group changing name", func(t *testing.T) {
 		projectName := "project01"
-		p02.Name = "newproject01"
-		p02.Parent.ID = path.Join("user", user.Name)
-		_, err := cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "projectgroup01", projectName), p02)
+		p02req.Name = "newproject01"
+		p02req.Parent.ID = path.Join("user", user.Name)
+		_, err := cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "projectgroup01", projectName), p02req)
 		testutil.NilError(t, err)
 	})
 	t.Run("test user project MembersCanPerformRunActions parameter", func(t *testing.T) {
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot set MembersCanPerformRunActions on an user project."))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("cannot set MembersCanPerformRunActions on an user project."), serrors.CannotSetMembersCanPerformRunActionsOnUserProject())
 		_, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{
 			Name:                        "project03",
 			Parent:                      types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name)},
@@ -549,8 +553,8 @@ func TestProjectUpdate(t *testing.T) {
 
 		// test update user project
 
-		p01.MembersCanPerformRunActions = true
-		_, err = cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "project01"), p01)
+		p01req.MembersCanPerformRunActions = true
+		_, err = cs.ah.UpdateProject(ctx, path.Join("user", user.Name, "project01"), p01req)
 		assert.Error(t, err, expectedErr.Error())
 	})
 }
@@ -572,7 +576,7 @@ func TestProjectGroupUpdate(t *testing.T) {
 	user, err := cs.ah.CreateUser(ctx, &action.CreateUserRequest{UserName: "user01"})
 	testutil.NilError(t, err)
 
-	rootPG, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
+	rootPGres, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
 	testutil.NilError(t, err)
 
 	pg01req := &action.CreateUpdateProjectGroupRequest{Name: "pg01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("user", user.Name)}, Visibility: types.VisibilityPublic}
@@ -603,7 +607,7 @@ func TestProjectGroupUpdate(t *testing.T) {
 	})
 	t.Run("move project to project group having project with same name", func(t *testing.T) {
 		projectGroupName := "pg01"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project group with name %q, path %q already exists", projectGroupName, path.Join("user", user.Name, projectGroupName)))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project group with name %q, path %q already exists", projectGroupName, path.Join("user", user.Name, projectGroupName)), serrors.ProjectGroupAlreadyExists())
 		pg05req.Parent.ID = path.Join("user", user.Name)
 		_, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, "pg02", projectGroupName), pg05req)
 		assert.Error(t, err, expectedErr.Error())
@@ -612,73 +616,69 @@ func TestProjectGroupUpdate(t *testing.T) {
 		projectGroupName := "pg01"
 		pg05req.Name = "newpg01"
 		pg05req.Parent.ID = path.Join("user", user.Name)
-		pg05, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, "pg02", projectGroupName), pg05req)
+		pg05res, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, "pg02", projectGroupName), pg05req)
 		testutil.NilError(t, err)
 
-		assert.Equal(t, pg05.Parent.ID, rootPG.ID)
+		assert.Equal(t, pg05res.ProjectGroup.Parent.ID, rootPGres.ProjectGroup.ID)
 	})
 	t.Run("move project group inside itself", func(t *testing.T) {
 		projectGroupName := "pg02"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot move project group inside itself or child project group"))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("cannot move project group inside itself or child project group"))
 		pg02req.Parent.ID = path.Join("user", user.Name, "pg02")
 		_, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, projectGroupName), pg02req)
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("move project group to child project group", func(t *testing.T) {
 		projectGroupName := "pg01"
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot move project group inside itself or child project group"))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("cannot move project group inside itself or child project group"))
 		pg01req.Parent.ID = path.Join("user", user.Name, "pg01", "pg01")
 		_, err := cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name, projectGroupName), pg01req)
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("change root project group parent kind", func(t *testing.T) {
-		var rootPG *types.ProjectGroup
-		rootPG, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
+		rootPGres, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
 		testutil.NilError(t, err)
 
-		rootPG.Parent.Kind = types.ObjectKindProjectGroup
-		rootPG.Name = "rootpg"
+		rootPGres.ProjectGroup.Parent.Kind = types.ObjectKindProjectGroup
+		rootPGres.ProjectGroup.Name = "rootpg"
 
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("changing project group parent kind isn't supported"))
-		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPG.Name, Parent: rootPG.Parent, Visibility: rootPG.Visibility})
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("changing project group parent kind isn't supported"))
+		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPGres.ProjectGroup.Name, Parent: rootPGres.ProjectGroup.Parent, Visibility: rootPGres.ProjectGroup.Visibility})
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("change root project group parent id", func(t *testing.T) {
-		var rootPG *types.ProjectGroup
-		rootPG, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
+		rootPGres, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
 		testutil.NilError(t, err)
 
-		rootPG.Parent.ID = path.Join("user", user.Name, "pg01")
+		rootPGres.ProjectGroup.Parent.ID = path.Join("user", user.Name, "pg01")
 
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot change root project group parent kind or id"))
-		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPG.Name, Parent: rootPG.Parent, Visibility: rootPG.Visibility})
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("cannot change root project group parent kind or id"))
+		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPGres.ProjectGroup.Name, Parent: rootPGres.ProjectGroup.Parent, Visibility: rootPGres.ProjectGroup.Visibility})
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("change root project group name", func(t *testing.T) {
-		var rootPG *types.ProjectGroup
-		rootPG, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
+		rootPGres, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
 		testutil.NilError(t, err)
 
-		rootPG.Name = "rootpgnewname"
+		rootPGres.ProjectGroup.Name = "rootpgnewname"
 
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("project group name for root project group must be empty"))
-		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPG.Name, Parent: rootPG.Parent, Visibility: rootPG.Visibility})
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("project group name for root project group must be empty"), serrors.InvalidProjectGroupName())
+		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPGres.ProjectGroup.Name, Parent: rootPGres.ProjectGroup.Parent, Visibility: rootPGres.ProjectGroup.Visibility})
 		assert.Error(t, err, expectedErr.Error())
 	})
 	t.Run("change root project group visibility", func(t *testing.T) {
-		var rootPG *types.ProjectGroup
-		rootPG, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
+		rootPGres, err := cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
 		testutil.NilError(t, err)
 
-		rootPG.Visibility = types.VisibilityPrivate
+		rootPGres.ProjectGroup.Visibility = types.VisibilityPrivate
 
-		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPG.Name, Parent: rootPG.Parent, Visibility: rootPG.Visibility})
+		_, err = cs.ah.UpdateProjectGroup(ctx, path.Join("user", user.Name), &action.CreateUpdateProjectGroupRequest{Name: rootPGres.ProjectGroup.Name, Parent: rootPGres.ProjectGroup.Parent, Visibility: rootPGres.ProjectGroup.Visibility})
 		testutil.NilError(t, err)
 
-		rootPG, err = cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
+		rootPGres, err = cs.ah.GetProjectGroup(ctx, path.Join("user", user.Name))
 		testutil.NilError(t, err)
 
-		assert.Equal(t, rootPG.Visibility, types.VisibilityPrivate)
+		assert.Equal(t, rootPGres.ProjectGroup.Visibility, types.VisibilityPrivate)
 	})
 }
 
@@ -700,21 +700,21 @@ func TestProjectGroupDelete(t *testing.T) {
 	testutil.NilError(t, err)
 
 	// create a projectgroup in org root project group
-	pg01, err := cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "projectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic})
+	pg01res, err := cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "projectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic})
 	testutil.NilError(t, err)
 
 	// create a child projectgroup in org root project group
-	_, err = cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "subprojectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: pg01.ID}, Visibility: types.VisibilityPublic})
+	_, err = cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "subprojectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: pg01res.ProjectGroup.ID}, Visibility: types.VisibilityPublic})
 	testutil.NilError(t, err)
 
 	t.Run("delete root project group", func(t *testing.T) {
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("cannot delete root project group"))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("cannot delete root project group"))
 		err := cs.ah.DeleteProjectGroup(ctx, path.Join("org", org.Name))
 		assert.Error(t, err, expectedErr.Error())
 	})
 
 	t.Run("delete project group", func(t *testing.T) {
-		err := cs.ah.DeleteProjectGroup(ctx, pg01.ID)
+		err := cs.ah.DeleteProjectGroup(ctx, pg01res.ProjectGroup.ID)
 		testutil.NilError(t, err)
 	})
 }
@@ -737,76 +737,76 @@ func TestProjectGroupDeleteDontSeeOldChildObjects(t *testing.T) {
 	testutil.NilError(t, err)
 
 	// create a projectgroup in org root project group
-	pg01, err := cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "projectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic})
+	pg01res, err := cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "projectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic})
 	testutil.NilError(t, err)
 
 	// create a child projectgroup in org root project group
-	spg01, err := cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "subprojectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: pg01.ID}, Visibility: types.VisibilityPublic})
+	spg01res, err := cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "subprojectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: pg01res.ProjectGroup.ID}, Visibility: types.VisibilityPublic})
 	testutil.NilError(t, err)
 
 	// create a project inside child projectgroup
-	project, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: spg01.ID}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
+	projectRes, err := cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: spg01res.ProjectGroup.ID}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 	testutil.NilError(t, err)
 
 	// create project secret
-	_, err = cs.ah.CreateSecret(ctx, &action.CreateUpdateSecretRequest{Name: "secret01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: project.ID}, Type: types.SecretTypeInternal, Data: map[string]string{"secret01": "secretvar01"}})
+	_, err = cs.ah.CreateSecret(ctx, &action.CreateUpdateSecretRequest{Name: "secret01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: projectRes.Project.ID}, Type: types.SecretTypeInternal, Data: map[string]string{"secret01": "secretvar01"}})
 	testutil.NilError(t, err)
 
 	// create project variable
-	_, err = cs.ah.CreateVariable(ctx, &action.CreateUpdateVariableRequest{Name: "variable01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: project.ID}, Values: []types.VariableValue{{SecretName: "secret01", SecretVar: "secretvar01"}}})
+	_, err = cs.ah.CreateVariable(ctx, &action.CreateUpdateVariableRequest{Name: "variable01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: projectRes.Project.ID}, Values: []types.VariableValue{{SecretName: "secret01", SecretVar: "secretvar01"}}})
 	testutil.NilError(t, err)
 
 	// delete projectgroup
-	err = cs.ah.DeleteProjectGroup(ctx, pg01.ID)
+	err = cs.ah.DeleteProjectGroup(ctx, pg01res.ProjectGroup.ID)
 	testutil.NilError(t, err)
 
 	// recreate the same hierarchj using the paths
-	pg01, err = cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "projectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic})
+	pg01res, err = cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "projectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name)}, Visibility: types.VisibilityPublic})
 	testutil.NilError(t, err)
 
-	spg01, err = cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "subprojectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name, pg01.Name)}, Visibility: types.VisibilityPublic})
+	spg01res, err = cs.ah.CreateProjectGroup(ctx, &action.CreateUpdateProjectGroupRequest{Name: "subprojectgroup01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name, pg01res.ProjectGroup.Name)}, Visibility: types.VisibilityPublic})
 	testutil.NilError(t, err)
 
-	project, err = cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name, pg01.Name, spg01.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
+	projectRes, err = cs.ah.CreateProject(ctx, &action.CreateUpdateProjectRequest{Name: "project01", Parent: types.Parent{Kind: types.ObjectKindProjectGroup, ID: path.Join("org", org.Name, pg01res.ProjectGroup.Name, spg01res.ProjectGroup.Name)}, Visibility: types.VisibilityPublic, RemoteRepositoryConfigType: types.RemoteRepositoryConfigTypeManual})
 	testutil.NilError(t, err)
 
-	secret, err := cs.ah.CreateSecret(ctx, &action.CreateUpdateSecretRequest{Name: "secret01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: path.Join("org", org.Name, pg01.Name, spg01.Name, project.Name)}, Type: types.SecretTypeInternal, Data: map[string]string{"secret01": "secretvar01"}})
+	secret, err := cs.ah.CreateSecret(ctx, &action.CreateUpdateSecretRequest{Name: "secret01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: path.Join("org", org.Name, pg01res.ProjectGroup.Name, spg01res.ProjectGroup.Name, projectRes.Project.Name)}, Type: types.SecretTypeInternal, Data: map[string]string{"secret01": "secretvar01"}})
 	testutil.NilError(t, err)
 
-	variable, err := cs.ah.CreateVariable(ctx, &action.CreateUpdateVariableRequest{Name: "variable01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: path.Join("org", org.Name, pg01.Name, spg01.Name, project.Name)}, Values: []types.VariableValue{{SecretName: "secret01", SecretVar: "secretvar01"}}})
+	variable, err := cs.ah.CreateVariable(ctx, &action.CreateUpdateVariableRequest{Name: "variable01", Parent: types.Parent{Kind: types.ObjectKindProject, ID: path.Join("org", org.Name, pg01res.ProjectGroup.Name, spg01res.ProjectGroup.Name, projectRes.Project.Name)}, Values: []types.VariableValue{{SecretName: "secret01", SecretVar: "secretvar01"}}})
 	testutil.NilError(t, err)
 
 	// Get by projectgroup id
-	projects, err := cs.ah.GetProjectGroupProjects(ctx, spg01.ID)
+	projectsRes, err := cs.ah.GetProjectGroupProjects(ctx, spg01res.ProjectGroup.ID)
 	testutil.NilError(t, err)
 
-	assert.Assert(t, cmpDiffObject(projects, []*types.Project{project}))
+	assert.Assert(t, cmpDiffObject(projectsRes.Projects, []*types.Project{projectRes.Project}))
 
 	// Get by projectgroup path
-	projects, err = cs.ah.GetProjectGroupProjects(ctx, path.Join("org", org.Name, pg01.Name, spg01.Name))
+	projectsRes, err = cs.ah.GetProjectGroupProjects(ctx, path.Join("org", org.Name, pg01res.ProjectGroup.Name, spg01res.ProjectGroup.Name))
 	testutil.NilError(t, err)
 
-	assert.Assert(t, cmpDiffObject(projects, []*types.Project{project}))
+	assert.Assert(t, cmpDiffObject(projectsRes.Projects, []*types.Project{projectRes.Project}))
 
-	secrets, err := cs.ah.GetSecrets(ctx, types.ObjectKindProject, project.ID, false)
+	secretsRes, err := cs.ah.GetSecrets(ctx, types.ObjectKindProject, projectRes.Project.ID, false)
 	testutil.NilError(t, err)
 
-	assert.Assert(t, cmpDiffObject(secrets, []*types.Secret{secret}))
+	assert.Assert(t, cmpDiffObject(secretsRes.Secrets, []*types.Secret{secret}))
 
-	secrets, err = cs.ah.GetSecrets(ctx, types.ObjectKindProject, path.Join("org", org.Name, pg01.Name, spg01.Name, project.Name), false)
+	secretsRes, err = cs.ah.GetSecrets(ctx, types.ObjectKindProject, path.Join("org", org.Name, pg01res.ProjectGroup.Name, spg01res.ProjectGroup.Name, projectRes.Project.Name), false)
 	testutil.NilError(t, err)
 
-	assert.Assert(t, cmpDiffObject(secrets, []*types.Secret{secret}))
+	assert.Assert(t, cmpDiffObject(secretsRes.Secrets, []*types.Secret{secret}))
 
-	variables, err := cs.ah.GetVariables(ctx, types.ObjectKindProject, project.ID, false)
+	variablesRes, err := cs.ah.GetVariables(ctx, types.ObjectKindProject, projectRes.Project.ID, false)
 	testutil.NilError(t, err)
 
-	assert.Assert(t, cmpDiffObject(variables, []*types.Variable{variable}))
+	assert.Assert(t, cmpDiffObject(variablesRes.Variables, []*types.Variable{variable}))
 
-	variables, err = cs.ah.GetVariables(ctx, types.ObjectKindProject, path.Join("org", org.Name, pg01.Name, spg01.Name, project.Name), false)
+	variablesRes, err = cs.ah.GetVariables(ctx, types.ObjectKindProject, path.Join("org", org.Name, pg01res.ProjectGroup.Name, spg01res.ProjectGroup.Name, projectRes.Project.Name), false)
 	testutil.NilError(t, err)
 
-	assert.Assert(t, cmpDiffObject(variables, []*types.Variable{variable}))
+	assert.Assert(t, cmpDiffObject(variablesRes.Variables, []*types.Variable{variable}))
 }
 
 func TestOrgMembers(t *testing.T) {
@@ -951,11 +951,8 @@ func TestGetRemoteSources(t *testing.T) {
 			// default sortdirection is asc
 
 			// reverse if sortDirection is desc
-			// TODO(sgotti) use go 1.21 generics slices.Reverse when removing support for go < 1.21
 			if tt.sortDirection == types.SortDirectionDesc {
-				for i, j := 0, len(expectedRemoteSources)-1; i < j; i, j = i+1, j-1 {
-					expectedRemoteSources[i], expectedRemoteSources[j] = expectedRemoteSources[j], expectedRemoteSources[i]
-				}
+				slices.Reverse(expectedRemoteSources)
 			}
 
 			callsNumber := 0
@@ -1057,11 +1054,8 @@ func TestGetUsers(t *testing.T) {
 			// default sortdirection is asc
 
 			// reverse if sortDirection is desc
-			// TODO(sgotti) use go 1.21 generics slices.Reverse when removing support for go < 1.21
 			if tt.sortDirection == types.SortDirectionDesc {
-				for i, j := 0, len(expectedUsers)-1; i < j; i, j = i+1, j-1 {
-					expectedUsers[i], expectedUsers[j] = expectedUsers[j], expectedUsers[i]
-				}
+				slices.Reverse(expectedUsers)
 			}
 
 			callsNumber := 0
@@ -1228,11 +1222,8 @@ func TestGetOrgs(t *testing.T) {
 			// default sortdirection is asc
 
 			// reverse if sortDirection is desc
-			// TODO(sgotti) use go 1.21 generics slices.Reverse when removing support for go < 1.21
 			if tt.sortDirection == types.SortDirectionDesc {
-				for i, j := 0, len(expectedOrgs)-1; i < j; i, j = i+1, j-1 {
-					expectedOrgs[i], expectedOrgs[j] = expectedOrgs[j], expectedOrgs[i]
-				}
+				slices.Reverse(expectedOrgs)
 			}
 
 			callsNumber := 0
@@ -1342,11 +1333,8 @@ func TestGetOrgMembers(t *testing.T) {
 			// default sortdirection is asc
 
 			// reverse if sortDirection is desc
-			// TODO(sgotti) use go 1.21 generics slices.Reverse when removing support for go < 1.21
 			if tt.sortDirection == types.SortDirectionDesc {
-				for i, j := 0, len(expectedUsers)-1; i < j; i, j = i+1, j-1 {
-					expectedUsers[i], expectedUsers[j] = expectedUsers[j], expectedUsers[i]
-				}
+				slices.Reverse(expectedUsers)
 			}
 
 			callsNumber := 0
@@ -1461,11 +1449,8 @@ func TestGetUserOrgs(t *testing.T) {
 			// default sortdirection is asc
 
 			// reverse if sortDirection is desc
-			// TODO(sgotti) use go 1.21 generics slices.Reverse when removing support for go < 1.21
 			if tt.sortDirection == types.SortDirectionDesc {
-				for i, j := 0, len(expectedOrgs)-1; i < j; i, j = i+1, j-1 {
-					expectedOrgs[i], expectedOrgs[j] = expectedOrgs[j], expectedOrgs[i]
-				}
+				slices.Reverse(expectedOrgs)
 			}
 
 			callsNumber := 0
@@ -1537,7 +1522,7 @@ func TestRemoteSource(t *testing.T) {
 				_, err := cs.ah.CreateRemoteSource(ctx, rsreq)
 				testutil.NilError(t, err)
 
-				expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf(`remotesource "rs01" already exists`))
+				expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg(`remotesource "rs01" already exists`), serrors.RemoteSourceAlreadyExists())
 				_, err = cs.ah.CreateRemoteSource(ctx, rsreq)
 				assert.Error(t, err, expectedErr.Error())
 			},
@@ -1605,7 +1590,7 @@ func TestRemoteSource(t *testing.T) {
 				_, err = cs.ah.CreateRemoteSource(ctx, rs02req)
 				testutil.NilError(t, err)
 
-				expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf(`remotesource "rs02" already exists`))
+				expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg(`remotesource "rs02" already exists`), serrors.RemoteSourceAlreadyExists())
 				rs01req.Name = "rs02"
 				_, err = cs.ah.UpdateRemoteSource(ctx, "rs01", rs01req)
 				assert.Error(t, err, expectedErr.Error())
@@ -1848,7 +1833,7 @@ func TestOrgInvitation(t *testing.T) {
 				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
 				testutil.NilError(t, err)
 
-				expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("invitation already exists"))
+				expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invitation already exists"), serrors.InvitationAlreadyExists())
 				_, err = cs.ah.CreateOrgInvitation(ctx, rs)
 				assert.Error(t, err, expectedErr.Error())
 			},

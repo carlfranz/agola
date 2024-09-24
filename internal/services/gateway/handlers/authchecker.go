@@ -147,15 +147,15 @@ func NewAuthChecker(log zerolog.Logger, configstoreClient *csclient.Client, opts
 }
 
 func (h *AuthChecker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	err := h.do(ctx, w, r)
+	err := h.do(w, r)
 	if util.HTTPError(w, err) {
 		h.log.Err(err).Send()
 	}
 }
 
-func (h *AuthChecker) do(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *AuthChecker) do(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+
 	for _, checker := range h.checkers {
 		res, err := checker.DoAuth(ctx, r)
 		if err != nil {
@@ -177,15 +177,17 @@ func (h *AuthChecker) do(ctx context.Context, w http.ResponseWriter, r *http.Req
 			}
 
 			h.doNext(ctx, w, r)
+
 			return nil
 		}
 	}
 
 	if h.required {
-		return util.NewAPIError(util.ErrUnauthorized, errors.Errorf("auth required but no auth data"))
+		return util.NewAPIError(util.ErrUnauthorized, util.WithAPIErrorMsg("auth required but no auth data"))
 	}
 
 	h.doNext(ctx, w, r)
+
 	return nil
 }
 
@@ -194,9 +196,9 @@ func (h *AuthChecker) checkAuthResponse(name string, res *checkerResponse) (bool
 
 	if res.failAuth {
 		if res.authErr != nil {
-			return false, util.NewAPIError(util.ErrUnauthorized, errors.Wrapf(res.authErr, "checker %s: auth failed", name))
+			return false, util.NewAPIErrorWrap(util.ErrUnauthorized, res.authErr, util.WithAPIErrorMsg("checker %s: auth failed", name))
 		}
-		return false, util.NewAPIError(util.ErrUnauthorized, errors.Errorf("checker %s: auth failed (no auth err reported by checker)", name))
+		return false, util.NewAPIError(util.ErrUnauthorized, util.WithAPIErrorMsg("checker %s: auth failed (no auth err reported by checker)", name))
 	}
 
 	if res.authErr != nil {

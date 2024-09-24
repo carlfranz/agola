@@ -13,6 +13,7 @@ import (
 
 	"agola.io/agola/internal/testutil"
 	"agola.io/agola/internal/util"
+	gwapierrors "agola.io/agola/services/gateway/api/errors"
 	gwapitypes "agola.io/agola/services/gateway/api/types"
 	gwclient "agola.io/agola/services/gateway/client"
 	rstypes "agola.io/agola/services/runservice/types"
@@ -92,7 +93,7 @@ func TestGetProjectGroup(t *testing.T) {
 		name   string
 		client *gwclient.Client
 		pg     *gwapitypes.ProjectGroupResponse
-		err    string
+		err    error
 	}{
 		{
 			name:   "user owner get pub org pub pg",
@@ -123,7 +124,7 @@ func TestGetProjectGroup(t *testing.T) {
 			name:   "user not member get pub org priv pg",
 			client: gwClientUser03,
 			pg:     pubOrgPrivPG,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get priv org pub pg",
@@ -139,7 +140,7 @@ func TestGetProjectGroup(t *testing.T) {
 			name:   "user not member get priv org pub pg",
 			client: gwClientUser03,
 			pg:     privOrgPubPG,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get priv org priv pg",
@@ -155,7 +156,7 @@ func TestGetProjectGroup(t *testing.T) {
 			name:   "user not member get priv org priv pg",
 			client: gwClientUser03,
 			pg:     privOrgPrivPG,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 	}
 
@@ -164,8 +165,8 @@ func TestGetProjectGroup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pg, _, err := tt.client.GetProjectGroup(ctx, tt.pg.ID)
 
-			if tt.err != "" {
-				assert.Error(t, err, tt.err)
+			if tt.err != nil {
+				assert.Error(t, err, tt.err.Error())
 			} else {
 				testutil.NilError(t, err)
 
@@ -284,7 +285,7 @@ func TestGetProject(t *testing.T) {
 		name   string
 		client *gwclient.Client
 		proj   *gwapitypes.ProjectResponse
-		err    string
+		err    error
 	}{
 		{
 			name:   "user owner get pub org pub pg pub proj",
@@ -315,7 +316,7 @@ func TestGetProject(t *testing.T) {
 			name:   "user not member get pub org pub pg priv proj",
 			client: gwClientUser03,
 			proj:   pubOrgPubPGPrivProj,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get pub org priv pg pub proj",
@@ -331,7 +332,7 @@ func TestGetProject(t *testing.T) {
 			name:   "user not member get pub org priv pg pub proj",
 			client: gwClientUser03,
 			proj:   pubOrgPrivPGPubProj,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get pub org priv pg priv proj",
@@ -347,7 +348,7 @@ func TestGetProject(t *testing.T) {
 			name:   "user not member get pub org priv pg priv proj",
 			client: gwClientUser03,
 			proj:   pubOrgPrivPGPrivProj,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get priv org pub pg pub proj",
@@ -363,7 +364,7 @@ func TestGetProject(t *testing.T) {
 			name:   "user not member get priv org pub pg pub proj",
 			client: gwClientUser03,
 			proj:   privOrgPubPGPubProj,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get priv org pub pg priv proj",
@@ -379,7 +380,7 @@ func TestGetProject(t *testing.T) {
 			name:   "user not member get priv org pub pg priv proj",
 			client: gwClientUser03,
 			proj:   privOrgPubPGPrivProj,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get priv org priv pg pub proj",
@@ -395,7 +396,7 @@ func TestGetProject(t *testing.T) {
 			name:   "user not member get priv org priv pg pub proj",
 			client: gwClientUser03,
 			proj:   privOrgPrivPGPubProj,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 		{
 			name:   "user owner get priv org priv pg priv proj",
@@ -411,7 +412,7 @@ func TestGetProject(t *testing.T) {
 			name:   "user not member get priv org priv pg priv proj",
 			client: gwClientUser03,
 			proj:   privOrgPrivPGPrivProj,
-			err:    remoteErrorNotExist,
+			err:    util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeOrganizationDoesNotExist})),
 		},
 	}
 
@@ -420,8 +421,8 @@ func TestGetProject(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pg, _, err := tt.client.GetProject(ctx, tt.proj.ID)
 
-			if tt.err != "" {
-				assert.Error(t, err, tt.err)
+			if tt.err != nil {
+				assert.Error(t, err, tt.err.Error())
 			} else {
 				testutil.NilError(t, err)
 
@@ -479,14 +480,14 @@ func TestUpdateProject(t *testing.T) {
 		assert.Assert(t, !project.PassVarsToForkedPR)
 
 		project, _, err = gwClient.UpdateProject(ctx, project.ID, &gwapitypes.UpdateProjectRequest{
-			PassVarsToForkedPR: util.BoolP(false),
+			PassVarsToForkedPR: util.Ptr(false),
 		})
 		testutil.NilError(t, err)
 
 		assert.Assert(t, !project.PassVarsToForkedPR)
 
 		project, _, err = gwClient.UpdateProject(ctx, project.ID, &gwapitypes.UpdateProjectRequest{
-			PassVarsToForkedPR: util.BoolP(true),
+			PassVarsToForkedPR: util.Ptr(true),
 		})
 		testutil.NilError(t, err)
 
@@ -528,7 +529,8 @@ func TestUpdateProject(t *testing.T) {
 		}
 
 		_, _, err = gwClient.CreateProject(ctx, req)
-		assert.Error(t, err, remoteErrorBadRequest)
+		expectedErr := util.NewRemoteError(util.ErrBadRequest, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeCannotSetMembersCanPerformRunActionsOnUserProject}))
+		assert.Error(t, err, expectedErr.Error())
 	})
 
 	t.Run("update users's project with MembersCanPerformRunActions true", func(t *testing.T) {
@@ -554,9 +556,10 @@ func TestUpdateProject(t *testing.T) {
 
 		_, _, err = gwClient.UpdateProject(ctx, project.ID, &gwapitypes.UpdateProjectRequest{
 			Name:                        &project.Name,
-			MembersCanPerformRunActions: util.BoolP(true),
+			MembersCanPerformRunActions: util.Ptr(true),
 		})
-		assert.Error(t, err, remoteErrorBadRequest)
+		expectedErr := util.NewRemoteError(util.ErrBadRequest, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeCannotSetMembersCanPerformRunActionsOnUserProject}))
+		assert.Error(t, err, expectedErr.Error())
 	})
 
 	t.Run("create/update orgs's project", func(t *testing.T) {
@@ -587,7 +590,7 @@ func TestUpdateProject(t *testing.T) {
 		// test update org project with MembersCanPerformRunActions true
 		project, _, err = gwClient.UpdateProject(ctx, project.ID, &gwapitypes.UpdateProjectRequest{
 			Name:                        &project.Name,
-			MembersCanPerformRunActions: util.BoolP(true),
+			MembersCanPerformRunActions: util.Ptr(true),
 		})
 		testutil.NilError(t, err)
 
@@ -609,7 +612,7 @@ func TestUpdateProject(t *testing.T) {
 		// test update org project with MembersCanPerformRunActions false
 		project, _, err = gwClient.UpdateProject(ctx, project.ID, &gwapitypes.UpdateProjectRequest{
 			Name:                        &project.Name,
-			MembersCanPerformRunActions: util.BoolP(false),
+			MembersCanPerformRunActions: util.Ptr(false),
 		})
 		testutil.NilError(t, err)
 
@@ -641,7 +644,7 @@ func TestRefreshRemoteRepositoryInfo(t *testing.T) {
 
 	assert.Equal(t, project.DefaultBranch, "master")
 
-	_, _, err = giteaClient.EditRepo(giteaRepo.Owner.UserName, giteaRepo.Name, gitea.EditRepoOption{DefaultBranch: util.StringP("testbranch")})
+	_, _, err = giteaClient.EditRepo(giteaRepo.Owner.UserName, giteaRepo.Name, gitea.EditRepoOption{DefaultBranch: util.Ptr("testbranch")})
 	testutil.NilError(t, err)
 
 	project, _, err = gwClient.RefreshRemoteRepo(ctx, project.ID)
@@ -655,104 +658,10 @@ func TestRefreshRemoteRepositoryInfo(t *testing.T) {
 	assert.DeepEqual(t, project, p)
 }
 
-func TestGetProjectRuns(t *testing.T) {
+func TestGetProjectRun(t *testing.T) {
 	t.Parallel()
 
-	config := EnvRunConfig
-
-	tests := []struct {
-		name         string
-		phaseFilter  []string
-		resultFilter []string
-		num          int
-	}{
-		{
-			name: "get all runs",
-			num:  1,
-		},
-		{
-			name:         "get runs phase finished and result success",
-			phaseFilter:  []string{"finished"},
-			resultFilter: []string{"success"},
-			num:          1,
-		},
-		{
-			name:        "get runs phase running",
-			phaseFilter: []string{"running"},
-			num:         0,
-		},
-		{
-			name:         "get runs result failed",
-			resultFilter: []string{"failed"},
-			num:          0,
-		},
-		{
-			name:         "get runs with all filters",
-			phaseFilter:  []string{"setuperror", "queued", "cancelled", "running", "finished"},
-			resultFilter: []string{"unknown", "stopped", "success", "failed"},
-			num:          1,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			dir := t.TempDir()
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			sc := setup(ctx, t, dir, withGitea(true))
-			defer sc.stop()
-
-			giteaAPIURL := fmt.Sprintf("http://%s:%s", sc.gitea.HTTPListenAddress, sc.gitea.HTTPPort)
-
-			giteaToken, token := createLinkedAccount(ctx, t, sc.gitea, sc.config)
-
-			giteaClient, err := gitea.NewClient(giteaAPIURL, gitea.SetToken(giteaToken))
-			testutil.NilError(t, err)
-
-			gwClient := gwclient.NewClient(sc.config.Gateway.APIExposedURL, token)
-
-			giteaRepo, project := createProject(ctx, t, giteaClient, gwClient)
-
-			push(t, config, giteaRepo.CloneURL, giteaToken, "commit", false)
-
-			_ = testutil.Wait(30*time.Second, func() (bool, error) {
-				runs, _, err := gwClient.GetProjectRuns(ctx, project.ID, nil, nil, 0, 0, false)
-				if err != nil {
-					return false, nil
-				}
-
-				if len(runs) == 0 {
-					return false, nil
-				}
-				run := runs[0]
-				if run.Phase != rstypes.RunPhaseFinished {
-					return false, nil
-				}
-
-				return true, nil
-			})
-
-			runs, _, err := gwClient.GetProjectRuns(ctx, project.ID, tt.phaseFilter, tt.resultFilter, 0, 0, false)
-			testutil.NilError(t, err)
-
-			assert.Assert(t, cmp.Len(runs, tt.num))
-
-			if len(runs) > 0 {
-				run := runs[0]
-				assert.Equal(t, run.Phase, rstypes.RunPhaseFinished)
-				assert.Equal(t, run.Result, rstypes.RunResultSuccess)
-			}
-		})
-	}
-
 	t.Run("get not existing run", func(t *testing.T) {
-		t.Parallel()
-
 		dir := t.TempDir()
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -773,7 +682,8 @@ func TestGetProjectRuns(t *testing.T) {
 		_, project := createProject(ctx, t, giteaClient, gwClient)
 
 		_, _, err = gwClient.GetProjectRun(ctx, project.ID, 1)
-		assert.Error(t, err, remoteErrorNotExist)
+		expectedErr := util.NewRemoteError(util.ErrNotExist, util.WithRemoteErrorDetailedError(&util.RemoteDetailedError{Code: gwapierrors.ErrorCodeRunDoesNotExist}))
+		assert.Error(t, err, expectedErr.Error())
 	})
 }
 
@@ -831,8 +741,8 @@ func TestProjectRunActions(t *testing.T) {
 
 		// test org run actions executed by an user that's organization owner
 
-		_ = testutil.Wait(30*time.Second, func() (bool, error) {
-			runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, nil, nil, 0, 0, false)
+		err = testutil.Wait(60*time.Second, func() (bool, error) {
+			runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, &gwclient.GetRunsOptions{ListOptions: &gwclient.ListOptions{SortDirection: gwapitypes.SortDirectionDesc}})
 			if err != nil {
 				return false, nil
 			}
@@ -846,8 +756,9 @@ func TestProjectRunActions(t *testing.T) {
 
 			return true, nil
 		})
+		testutil.NilError(t, err)
 
-		runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, nil, nil, 0, 0, false)
+		runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, &gwclient.GetRunsOptions{ListOptions: &gwclient.ListOptions{SortDirection: gwapitypes.SortDirectionDesc}})
 		testutil.NilError(t, err)
 
 		assert.Assert(t, cmp.Len(runs, 1))
@@ -875,12 +786,12 @@ func TestProjectRunActions(t *testing.T) {
 			ActionType: gwapitypes.RunActionTypeRestart,
 			FromStart:  true,
 		})
-		assert.Error(t, err, expectedErr)
+		assert.Error(t, err, expectedErr.Error())
 
 		// test org run actions executed by an organization member type with MembersCanPerformRunActions false
 
 		_, _, err = gwUser01Client.UpdateProject(ctx, project.ID, &gwapitypes.UpdateProjectRequest{
-			MembersCanPerformRunActions: util.BoolP(false),
+			MembersCanPerformRunActions: util.Ptr(false),
 		})
 		testutil.NilError(t, err)
 
@@ -888,7 +799,7 @@ func TestProjectRunActions(t *testing.T) {
 			ActionType: gwapitypes.RunActionTypeRestart,
 			FromStart:  true,
 		})
-		assert.Error(t, err, expectedErr)
+		assert.Error(t, err, expectedErr.Error())
 	})
 
 	t.Run("run actions on user's project", func(t *testing.T) {
@@ -924,8 +835,8 @@ func TestProjectRunActions(t *testing.T) {
 
 		push(t, config, giteaRepo.CloneURL, giteaToken, "commit", false)
 
-		_ = testutil.Wait(30*time.Second, func() (bool, error) {
-			runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, nil, nil, 0, 0, false)
+		err = testutil.Wait(60*time.Second, func() (bool, error) {
+			runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, &gwclient.GetRunsOptions{ListOptions: &gwclient.ListOptions{SortDirection: gwapitypes.SortDirectionDesc}})
 			if err != nil {
 				return false, nil
 			}
@@ -939,8 +850,9 @@ func TestProjectRunActions(t *testing.T) {
 
 			return true, nil
 		})
+		testutil.NilError(t, err)
 
-		runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, nil, nil, 0, 0, false)
+		runs, _, err := gwUser01Client.GetProjectRuns(ctx, project.ID, &gwclient.GetRunsOptions{ListOptions: &gwclient.ListOptions{SortDirection: gwapitypes.SortDirectionDesc}})
 		testutil.NilError(t, err)
 
 		assert.Assert(t, cmp.Len(runs, 1))
@@ -960,6 +872,6 @@ func TestProjectRunActions(t *testing.T) {
 			ActionType: gwapitypes.RunActionTypeRestart,
 			FromStart:  true,
 		})
-		assert.Error(t, err, expectedErr)
+		assert.Error(t, err, expectedErr.Error())
 	})
 }

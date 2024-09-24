@@ -23,8 +23,7 @@ import (
 	"github.com/sorintlab/errors"
 
 	"agola.io/agola/internal/services/configstore/action"
-	"agola.io/agola/internal/services/configstore/db"
-	"agola.io/agola/internal/sqlg/sql"
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/util"
 	csapitypes "agola.io/agola/services/configstore/api/types"
 	"agola.io/agola/services/configstore/types"
@@ -32,38 +31,36 @@ import (
 
 type OrgHandler struct {
 	log zerolog.Logger
-	d   *db.DB
+	ah  *action.ActionHandler
 }
 
-func NewOrgHandler(log zerolog.Logger, d *db.DB) *OrgHandler {
-	return &OrgHandler{log: log, d: d}
+func NewOrgHandler(log zerolog.Logger, ah *action.ActionHandler) *OrgHandler {
+	return &OrgHandler{log: log, ah: ah}
 }
 
 func (h *OrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *OrgHandler) do(r *http.Request) (*types.Organization, error) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	orgRef := vars["orgref"]
 
-	var org *types.Organization
-	err := h.d.Do(ctx, func(tx *sql.Tx) error {
-		var err error
-		org, err = h.d.GetOrg(tx, orgRef)
-		return errors.WithStack(err)
-	})
+	org, err := h.ah.GetOrg(ctx, orgRef)
 	if err != nil {
-		h.log.Err(err).Send()
-		util.HTTPError(w, err)
-		return
+		return nil, errors.WithStack(err)
 	}
 
-	if org == nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrNotExist, errors.Errorf("org %q doesn't exist", orgRef)))
-		return
-	}
-
-	if err := util.HTTPResponse(w, http.StatusOK, org); err != nil {
-		h.log.Err(err).Send()
-	}
+	return org, nil
 }
 
 type CreateOrgHandler struct {
@@ -76,13 +73,24 @@ func NewCreateOrgHandler(log zerolog.Logger, ah *action.ActionHandler) *CreateOr
 }
 
 func (h *CreateOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusCreated, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *CreateOrgHandler) do(r *http.Request) (*types.Organization, error) {
 	ctx := r.Context()
 
 	var req *csapitypes.CreateOrgRequest
 	d := json.NewDecoder(r.Body)
 	if err := d.Decode(&req); err != nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
-		return
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
 	}
 
 	creq := &action.CreateOrgRequest{
@@ -92,14 +100,11 @@ func (h *CreateOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	org, err := h.ah.CreateOrg(ctx, creq)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusCreated, org); err != nil {
-		h.log.Err(err).Send()
-	}
+	return org, nil
 }
 
 type UpdateOrgHandler struct {
@@ -112,6 +117,18 @@ func NewUpdateOrgHandler(log zerolog.Logger, ah *action.ActionHandler) *UpdateOr
 }
 
 func (h *UpdateOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *UpdateOrgHandler) do(r *http.Request) (*types.Organization, error) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	orgRef := vars["orgref"]
@@ -119,8 +136,7 @@ func (h *UpdateOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req *csapitypes.UpdateOrgRequest
 	d := json.NewDecoder(r.Body)
 	if err := d.Decode(&req); err != nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
-		return
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
 	}
 
 	creq := &action.UpdateOrgRequest{
@@ -128,14 +144,11 @@ func (h *UpdateOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	org, err := h.ah.UpdateOrg(ctx, orgRef, creq)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusOK, org); err != nil {
-		h.log.Err(err).Send()
-	}
+	return org, nil
 }
 
 type DeleteOrgHandler struct {
@@ -148,19 +161,28 @@ func NewDeleteOrgHandler(log zerolog.Logger, ah *action.ActionHandler) *DeleteOr
 }
 
 func (h *DeleteOrgHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+func (h *DeleteOrgHandler) do(r *http.Request) error {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
 	orgRef := vars["orgref"]
 
 	err := h.ah.DeleteOrg(ctx, orgRef)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return errors.WithStack(err)
 	}
-	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
-		h.log.Err(err).Send()
-	}
+
+	return nil
 }
 
 type OrgsHandler struct {
@@ -200,7 +222,7 @@ func (h *OrgsHandler) do(w http.ResponseWriter, r *http.Request) ([]*types.Organ
 	if ok {
 		for _, vs := range visibilitiesStr {
 			if !types.IsValidVisibility(types.Visibility(vs)) {
-				return nil, util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid visibility"))
+				return nil, util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid visibility"), serrors.InvalidVisibility())
 			}
 			visibilities = append(visibilities, types.Visibility(vs))
 		}
@@ -226,6 +248,18 @@ func NewAddOrgMemberHandler(log zerolog.Logger, ah *action.ActionHandler) *AddOr
 }
 
 func (h *AddOrgMemberHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusCreated, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *AddOrgMemberHandler) do(r *http.Request) (*types.OrganizationMember, error) {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
@@ -235,19 +269,15 @@ func (h *AddOrgMemberHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	var req *csapitypes.AddOrgMemberRequest
 	d := json.NewDecoder(r.Body)
 	if err := d.Decode(&req); err != nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, err))
-		return
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
 	}
 
-	org, err := h.ah.AddOrgMember(ctx, orgRef, userRef, req.Role)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	orgMember, err := h.ah.AddOrgMember(ctx, orgRef, userRef, req.Role)
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusCreated, org); err != nil {
-		h.log.Err(err).Send()
-	}
+	return orgMember, nil
 }
 
 type RemoveOrgMemberHandler struct {
@@ -260,13 +290,7 @@ func NewRemoveOrgMemberHandler(log zerolog.Logger, ah *action.ActionHandler) *Re
 }
 
 func (h *RemoveOrgMemberHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	vars := mux.Vars(r)
-	orgRef := vars["orgref"]
-	userRef := vars["userref"]
-
-	err := h.ah.RemoveOrgMember(ctx, orgRef, userRef)
+	err := h.do(r)
 	if util.HTTPError(w, err) {
 		h.log.Err(err).Send()
 		return
@@ -275,6 +299,21 @@ func (h *RemoveOrgMemberHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
 		h.log.Err(err).Send()
 	}
+}
+
+func (h *RemoveOrgMemberHandler) do(r *http.Request) error {
+	ctx := r.Context()
+
+	vars := mux.Vars(r)
+	orgRef := vars["orgref"]
+	userRef := vars["userref"]
+
+	err := h.ah.RemoveOrgMember(ctx, orgRef, userRef)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	return nil
 }
 
 func orgMemberResponse(orgUser *action.OrgMember) *csapitypes.OrgMemberResponse {
@@ -350,19 +389,28 @@ func NewOrgInvitationsHandler(log zerolog.Logger, ah *action.ActionHandler) *Org
 }
 
 func (h *OrgInvitationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	vars := mux.Vars(r)
-	orgRef := vars["orgref"]
-
-	orgInvitations, err := h.ah.GetOrgInvitations(ctx, orgRef)
+	res, err := h.do(r)
 	if util.HTTPError(w, err) {
 		h.log.Err(err).Send()
 		return
 	}
 
-	if err := util.HTTPResponse(w, http.StatusOK, orgInvitations); err != nil {
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
 		h.log.Err(err).Send()
 	}
+}
+
+func (h *OrgInvitationsHandler) do(r *http.Request) ([]*types.OrgInvitation, error) {
+	ctx := r.Context()
+	vars := mux.Vars(r)
+	orgRef := vars["orgref"]
+
+	orgInvitations, err := h.ah.GetOrgInvitations(ctx, orgRef)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return orgInvitations, nil
 }
 
 type CreateOrgInvitationHandler struct {
@@ -375,6 +423,18 @@ func NewCreateOrgInvitationHandler(log zerolog.Logger, ah *action.ActionHandler)
 }
 
 func (h *CreateOrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusCreated, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *CreateOrgInvitationHandler) do(r *http.Request) (*types.OrgInvitation, error) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	orgRef := vars["orgref"]
@@ -382,8 +442,7 @@ func (h *CreateOrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	var req csapitypes.CreateOrgInvitationRequest
 	d := json.NewDecoder(r.Body)
 	if err := d.Decode(&req); err != nil {
-		h.log.Err(err).Send()
-		return
+		return nil, util.NewAPIErrorWrap(util.ErrBadRequest, err)
 	}
 
 	creq := &action.CreateOrgInvitationRequest{
@@ -393,14 +452,11 @@ func (h *CreateOrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	}
 
 	orgInvitation, err := h.ah.CreateOrgInvitation(ctx, creq)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusCreated, orgInvitation); err != nil {
-		h.log.Err(err).Send()
-	}
+	return orgInvitation, nil
 }
 
 type DeleteOrgInvitationHandler struct {
@@ -413,6 +469,17 @@ func NewDeleteOrgInvitationHandler(log zerolog.Logger, ah *action.ActionHandler)
 }
 
 func (h *DeleteOrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+func (h *DeleteOrgInvitationHandler) do(r *http.Request) error {
 	ctx := r.Context()
 
 	vars := mux.Vars(r)
@@ -420,13 +487,11 @@ func (h *DeleteOrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	userRef := vars["userref"]
 
 	err := h.ah.DeleteOrgInvitation(ctx, orgRef, userRef)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return errors.WithStack(err)
 	}
-	if err := util.HTTPResponse(w, http.StatusNoContent, nil); err != nil {
-		h.log.Err(err).Send()
-	}
+
+	return nil
 }
 
 type OrgInvitationHandler struct {
@@ -439,24 +504,29 @@ func NewOrgInvitationHandler(log zerolog.Logger, ah *action.ActionHandler) *OrgI
 }
 
 func (h *OrgInvitationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	res, err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+
+	if err := util.HTTPResponse(w, http.StatusOK, res); err != nil {
+		h.log.Err(err).Send()
+	}
+}
+
+func (h *OrgInvitationHandler) do(r *http.Request) (*types.OrgInvitation, error) {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	orgRef := vars["orgref"]
 	userRef := vars["userref"]
 
 	orgInvitation, err := h.ah.GetOrgInvitationByUserRef(ctx, orgRef, userRef)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
-	}
-	if orgInvitation == nil {
-		util.HTTPError(w, util.NewAPIError(util.ErrNotExist, errors.Errorf("invitation for org %q user %q doesn't exist", orgRef, userRef)))
-		return
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusOK, orgInvitation); err != nil {
-		h.log.Err(err).Send()
-	}
+	return orgInvitation, nil
 }
 
 type OrgInvitationActionHandler struct {
@@ -469,6 +539,14 @@ func NewOrgInvitationActionHandler(log zerolog.Logger, ah *action.ActionHandler)
 }
 
 func (h *OrgInvitationActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	err := h.do(r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+}
+
+func (h *OrgInvitationActionHandler) do(r *http.Request) error {
 	ctx := r.Context()
 	vars := mux.Vars(r)
 	orgRef := vars["orgref"]
@@ -477,8 +555,7 @@ func (h *OrgInvitationActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	var req csapitypes.OrgInvitationActionRequest
 	d := json.NewDecoder(r.Body)
 	if err := d.Decode(&req); err != nil {
-		h.log.Err(err).Send()
-		return
+		return util.NewAPIErrorWrap(util.ErrBadRequest, err)
 	}
 
 	creq := &action.OrgInvitationActionRequest{
@@ -488,12 +565,9 @@ func (h *OrgInvitationActionHandler) ServeHTTP(w http.ResponseWriter, r *http.Re
 	}
 
 	err := h.ah.OrgInvitationAction(ctx, creq)
-	if util.HTTPError(w, err) {
-		h.log.Err(err).Send()
-		return
+	if err != nil {
+		return errors.WithStack(err)
 	}
 
-	if err := util.HTTPResponse(w, http.StatusOK, nil); err != nil {
-		h.log.Err(err).Send()
-	}
+	return nil
 }

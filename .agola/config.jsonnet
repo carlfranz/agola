@@ -115,7 +115,7 @@ local task_build_push_images(name, target, push) =
         |||,
       },
     ]) + [
-      { type: 'run', command: '/kaniko/executor --context=dir:///kaniko/agola --build-arg AGOLAWEB_IMAGE=sorintlab/agola-web:v0.8.0 --target %s %s' % [target, options] },
+      { type: 'run', command: '/kaniko/executor --context=dir:///kaniko/agola --build-arg AGOLAWEB_IMAGE=sorintlab/agola-web:v0.10.0 --target %s %s' % [target, options] },
     ],
     depends: ['checkout code and save to workspace', 'integration tests', 'test docker driver'],
   };
@@ -128,7 +128,7 @@ local task_build_push_images(name, target, push) =
         [
           task_build_go(version, arch),
         ]
-        for version in ['1.20', '1.21']
+        for version in ['1.21', '1.22']
         for arch in ['amd64' /*, 'arm64' */]
       ]) + [
         {
@@ -139,7 +139,7 @@ local task_build_push_images(name, target, push) =
             { type: 'run', command: 'SKIP_K8S_TESTS=1 AGOLA_TOOLBOX_PATH="./bin" ./bin/docker-tests -test.parallel 5 -test.v' },
           ],
           depends: [
-            'build go 1.21 amd64',
+            'build go 1.22 amd64',
           ],
         },
         {
@@ -162,7 +162,7 @@ local task_build_push_images(name, target, push) =
             { type: 'run', name: 'integration tests', command: 'AGOLA_BIN_DIR="./bin" GITEA_PATH=${PWD}/bin/gitea DOCKER_BRIDGE_ADDRESS="172.18.0.1" ./bin/integration-tests -test.parallel 3 -test.v' },
           ],
           depends: [
-            'build go 1.21 amd64',
+            'build go 1.22 amd64',
           ],
         },
         {

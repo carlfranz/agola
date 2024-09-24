@@ -202,6 +202,60 @@ func TestParseConfig(t *testing.T) {
                 `,
 			err: errors.Errorf("task %q and its dependency %q have both a dependency on task %q", "task04", "task03", "task01"),
 		},
+		{
+			name: "test empty docker registries auth",
+			in: `
+                docker_registries_auth:
+                  'index.docker.io':
+                runs:
+                  - name: run01
+                    tasks:
+                      - name: task01
+                        runtime:
+                          type: pod
+                          containers:
+                            - image: alpine/git
+                        steps:
+                          - type: clone
+                `,
+			err: errors.Errorf(`docker registries auth "index.docker.io" is empty`),
+		},
+		{
+			name: "test run empty docker registries auth",
+			in: `
+                runs:
+                  - name: run01
+                    docker_registries_auth:
+                      'index.docker.io':
+                    tasks:
+                      - name: task01
+                        runtime:
+                          type: pod
+                          containers:
+                            - image: alpine/git
+                        steps:
+                          - type: clone
+                `,
+			err: errors.Errorf(`run "run01", docker registries auth "index.docker.io" is empty`),
+		},
+		{
+			name: "test task empty docker registries auth",
+			in: `
+                runs:
+                  - name: run01
+                    tasks:
+                      - name: task01
+                        docker_registries_auth:
+                          'index.docker.io':
+                        runtime:
+                          type: pod
+                          containers:
+                            - image: alpine/git
+                        steps:
+                          - type: clone
+                `,
+			err: errors.Errorf(`run "run01", task "task01", docker registries auth "index.docker.io" is empty`),
+		},
 	}
 
 	for _, tt := range tests {
@@ -406,7 +460,7 @@ func TestParseOutput(t *testing.T) {
 											Name: "command01",
 										},
 										Command: "command01",
-										Tty:     util.BoolP(true),
+										Tty:     util.Ptr(true),
 									},
 									&RunStep{
 										BaseStep: BaseStep{
@@ -414,7 +468,7 @@ func TestParseOutput(t *testing.T) {
 											Name: "name different than command",
 										},
 										Command: "command02",
-										Tty:     util.BoolP(true),
+										Tty:     util.Ptr(true),
 									},
 									&RunStep{
 										BaseStep: BaseStep{
@@ -426,7 +480,7 @@ func TestParseOutput(t *testing.T) {
 											"ENV01":             {Type: ValueTypeString, Value: "ENV01"},
 											"ENVFROMVARIABLE01": {Type: ValueTypeFromVariable, Value: "variable01"},
 										},
-										Tty: util.BoolP(true),
+										Tty: util.Ptr(true),
 									},
 									&SaveCacheStep{
 										BaseStep: BaseStep{Type: "save_cache"},
@@ -440,7 +494,7 @@ func TestParseOutput(t *testing.T) {
 											Name: "command01",
 										},
 										Command: "command01",
-										Tty:     util.BoolP(true),
+										Tty:     util.Ptr(true),
 									},
 									&RunStep{
 										BaseStep: BaseStep{
@@ -448,7 +502,7 @@ func TestParseOutput(t *testing.T) {
 											Name: "name different than command",
 										},
 										Command: "command02",
-										Tty:     util.BoolP(true),
+										Tty:     util.Ptr(true),
 									},
 									&RunStep{
 										BaseStep: BaseStep{
@@ -460,7 +514,7 @@ func TestParseOutput(t *testing.T) {
 											"ENV01":             {Type: ValueTypeString, Value: "ENV01"},
 											"ENVFROMVARIABLE01": {Type: ValueTypeFromVariable, Value: "variable01"},
 										},
-										Tty: util.BoolP(true),
+										Tty: util.Ptr(true),
 									},
 									&SaveCacheStep{
 										BaseStep: BaseStep{Type: "save_cache"},
@@ -564,7 +618,7 @@ func TestParseOutput(t *testing.T) {
 											Name: "command with default tty",
 										},
 										Command: "command01",
-										Tty:     util.BoolP(true),
+										Tty:     util.Ptr(true),
 									},
 									&RunStep{
 										BaseStep: BaseStep{
@@ -572,7 +626,7 @@ func TestParseOutput(t *testing.T) {
 											Name: "command with tty as true",
 										},
 										Command: "command02",
-										Tty:     util.BoolP(true),
+										Tty:     util.Ptr(true),
 									},
 									&RunStep{
 										BaseStep: BaseStep{
@@ -580,7 +634,7 @@ func TestParseOutput(t *testing.T) {
 											Name: "command with tty as false",
 										},
 										Command: "command03",
-										Tty:     util.BoolP(false),
+										Tty:     util.Ptr(false),
 									},
 								},
 								Depends: nil,

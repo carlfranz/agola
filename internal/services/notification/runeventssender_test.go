@@ -15,12 +15,13 @@
 package notification
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/sorintlab/errors"
 
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/testutil"
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/runservice/types"
@@ -152,6 +154,14 @@ func newRunEventsHandler(log zerolog.Logger, runEvents *runEvents) *runEventsHan
 }
 
 func (h *runEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	err := h.do(w, r)
+	if util.HTTPError(w, err) {
+		h.log.Err(err).Send()
+		return
+	}
+}
+
+func (h *runEventsHandler) do(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -163,16 +173,15 @@ func (h *runEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var err error
 		afterRunEventSequence, err = strconv.ParseUint(afterRunEventSequenceStr, 10, 64)
 		if err != nil {
-			util.HTTPError(w, util.NewAPIError(util.ErrBadRequest, errors.Wrapf(err, "cannot parse afterSequence")))
-			return
+			return util.NewAPIErrorWrap(util.ErrBadRequest, err, util.WithAPIErrorMsg("cannot parse afterSequence"), serrors.InvalidStartSequence())
 		}
 	}
 
 	h.runEvents.mu.Lock()
 	defer h.runEvents.mu.Unlock()
 
-	sort.Slice(h.runEvents.runEvents, func(i, j int) bool {
-		return h.runEvents.runEvents[i].Sequence < h.runEvents.runEvents[j].Sequence
+	slices.SortFunc(h.runEvents.runEvents, func(a, b *types.RunEvent) int {
+		return cmp.Compare(a.Sequence, b.Sequence)
 	})
 
 	for _, runEvent := range h.runEvents.runEvents {
@@ -183,10 +192,14 @@ func (h *runEventsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		runEventj, err := json.Marshal(runEvent)
 		if err != nil {
 			h.log.Err(err).Send()
+			continue
 		}
 
 		if _, err := w.Write([]byte(fmt.Sprintf("data: %s\n\n", runEventj))); err != nil {
 			h.log.Err(err).Send()
+			continue
 		}
 	}
+
+	return nil
 }

@@ -19,50 +19,111 @@ import (
 
 	"github.com/sorintlab/errors"
 
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/sqlg/sql"
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/configstore/types"
 )
 
-func (h *ActionHandler) GetVariables(ctx context.Context, parentKind types.ObjectKind, parentRef string, tree bool) ([]*types.Variable, error) {
+func (h *ActionHandler) GetVariablesTree(tx *sql.Tx, parentKind types.ObjectKind, parentID string) ([]*types.Variable, error) {
+	allVariables := []*types.Variable{}
+
+	for parentKind == types.ObjectKindProjectGroup || parentKind == types.ObjectKindProject {
+		vars, err := h.d.GetVariables(tx, parentID)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get variables for %s %q", parentKind, parentID)
+		}
+		allVariables = append(allVariables, vars...)
+
+		switch parentKind {
+		case types.ObjectKindProjectGroup:
+			projectGroup, err := h.GetProjectGroupByRef(tx, parentID)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			if projectGroup == nil {
+				return nil, errors.Errorf("projectgroup with id %q doesn't exist", parentID)
+			}
+			parentKind = projectGroup.Parent.Kind
+			parentID = projectGroup.Parent.ID
+		case types.ObjectKindProject:
+			project, err := h.GetProjectByRef(tx, parentID)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			if project == nil {
+				return nil, errors.Errorf("project with id %q doesn't exist", parentID)
+			}
+			parentKind = project.Parent.Kind
+			parentID = project.Parent.ID
+		}
+	}
+
+	return allVariables, nil
+}
+
+type GetVariablesResponse struct {
+	Variables   []*types.Variable
+	ParentPaths map[string]string
+}
+
+func (h *ActionHandler) GetVariables(ctx context.Context, parentKind types.ObjectKind, parentRef string, tree bool) (*GetVariablesResponse, error) {
 	var variables []*types.Variable
+	parentPaths := map[string]string{}
 	err := h.d.Do(ctx, func(tx *sql.Tx) error {
 		parentID, err := h.ResolveObjectID(tx, parentKind, parentRef)
 		if err != nil {
 			return errors.WithStack(err)
 		}
 		if tree {
-			variables, err = h.d.GetVariablesTree(tx, parentKind, parentID)
+			variables, err = h.GetVariablesTree(tx, parentKind, parentID)
 		} else {
 			variables, err = h.d.GetVariables(tx, parentID)
 		}
-		return errors.WithStack(err)
+
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		// populate variables parent paths
+		for _, s := range variables {
+			pp, err := h.GetPath(tx, s.Parent.Kind, s.Parent.ID)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			parentPaths[s.ID] = pp
+		}
+
+		return nil
 	})
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	return variables, nil
+	return &GetVariablesResponse{
+		Variables:   variables,
+		ParentPaths: parentPaths,
+	}, nil
 }
 
 func (h *ActionHandler) ValidateVariableReq(ctx context.Context, req *CreateUpdateVariableRequest) error {
 	if req.Name == "" {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable name required"))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("variable name required"), serrors.InvalidVariableName())
 	}
 	if !util.ValidateName(req.Name) {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid variable name %q", req.Name))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid variable name %q", req.Name), serrors.InvalidVariableName())
 	}
 	if len(req.Values) == 0 {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable values required"))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("variable values required"), serrors.InvalidVariableValues())
 	}
 	if req.Parent.Kind == "" {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable parent kind required"))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("variable parent kind required"))
 	}
 	if req.Parent.ID == "" {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable parent id required"))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("variable parent id required"))
 	}
 	if req.Parent.Kind != types.ObjectKindProject && req.Parent.Kind != types.ObjectKindProjectGroup {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid variable parent kind %q", req.Parent.Kind))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid variable parent kind %q", req.Parent.Kind))
 	}
 
 	return nil
@@ -93,7 +154,7 @@ func (h *ActionHandler) CreateVariable(ctx context.Context, req *CreateUpdateVar
 			return errors.WithStack(err)
 		}
 		if s != nil {
-			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID))
+			return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("variable with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID), serrors.VariableAlreadyExists())
 		}
 
 		variable = types.NewVariable(tx)
@@ -133,7 +194,7 @@ func (h *ActionHandler) UpdateVariable(ctx context.Context, curVariableName stri
 			return errors.WithStack(err)
 		}
 		if variable == nil {
-			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable with name %q for %s with id %q doesn't exists", curVariableName, req.Parent.Kind, req.Parent.ID))
+			return util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("variable with name %q for %s with id %q doesn't exists", curVariableName, req.Parent.Kind, req.Parent.ID), serrors.VariableDoesNotExist())
 		}
 
 		if variable.Name != req.Name {
@@ -143,7 +204,7 @@ func (h *ActionHandler) UpdateVariable(ctx context.Context, curVariableName stri
 				return errors.WithStack(err)
 			}
 			if u != nil {
-				return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID))
+				return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("variable with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID), serrors.VariableAlreadyExists())
 			}
 		}
 
@@ -178,7 +239,7 @@ func (h *ActionHandler) DeleteVariable(ctx context.Context, parentKind types.Obj
 			return errors.WithStack(err)
 		}
 		if variable == nil {
-			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("variable with name %q doesn't exist", variableName))
+			return util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("variable with name %q doesn't exist", variableName), serrors.VariableDoesNotExist())
 		}
 
 		if err := h.d.DeleteVariable(tx, variable.ID); err != nil {

@@ -19,10 +19,85 @@ import (
 
 	"github.com/sorintlab/errors"
 
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/sqlg/sql"
 	"agola.io/agola/internal/util"
 	"agola.io/agola/services/configstore/types"
 )
+
+func (h *ActionHandler) GetSecretTree(tx *sql.Tx, parentKind types.ObjectKind, parentID, name string) (*types.Secret, error) {
+	for parentKind == types.ObjectKindProjectGroup || parentKind == types.ObjectKindProject {
+		secret, err := h.d.GetSecretByName(tx, parentID, name)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get secret with name %q", name)
+		}
+		if secret != nil {
+			return secret, nil
+		}
+
+		switch parentKind {
+		case types.ObjectKindProjectGroup:
+			projectGroup, err := h.GetProjectGroupByRef(tx, parentID)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			if projectGroup == nil {
+				return nil, errors.Errorf("projectgroup with id %q doesn't exist", parentID)
+			}
+			parentKind = projectGroup.Parent.Kind
+			parentID = projectGroup.Parent.ID
+		case types.ObjectKindProject:
+			project, err := h.GetProjectByRef(tx, parentID)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			if project == nil {
+				return nil, errors.Errorf("project with id %q doesn't exist", parentID)
+			}
+			parentKind = project.Parent.Kind
+			parentID = project.Parent.ID
+		}
+	}
+
+	return nil, nil
+}
+
+func (h *ActionHandler) GetSecretsTree(tx *sql.Tx, parentKind types.ObjectKind, parentID string) ([]*types.Secret, error) {
+	allSecrets := []*types.Secret{}
+
+	for parentKind == types.ObjectKindProjectGroup || parentKind == types.ObjectKindProject {
+		secrets, err := h.d.GetSecrets(tx, parentID)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get secrets for %s %q", parentKind, parentID)
+		}
+		allSecrets = append(allSecrets, secrets...)
+
+		switch parentKind {
+		case types.ObjectKindProjectGroup:
+			projectGroup, err := h.GetProjectGroupByRef(tx, parentID)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			if projectGroup == nil {
+				return nil, errors.Errorf("projectgroup with id %q doesn't exist", parentID)
+			}
+			parentKind = projectGroup.Parent.Kind
+			parentID = projectGroup.Parent.ID
+		case types.ObjectKindProject:
+			project, err := h.GetProjectByRef(tx, parentID)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+			if project == nil {
+				return nil, errors.Errorf("project with id %q doesn't exist", parentID)
+			}
+			parentKind = project.Parent.Kind
+			parentID = project.Parent.ID
+		}
+	}
+
+	return allSecrets, nil
+}
 
 func (h *ActionHandler) GetSecret(ctx context.Context, secretID string) (*types.Secret, error) {
 	var secret *types.Secret
@@ -36,57 +111,80 @@ func (h *ActionHandler) GetSecret(ctx context.Context, secretID string) (*types.
 	}
 
 	if secret == nil {
-		return nil, util.NewAPIError(util.ErrNotExist, errors.Errorf("secret %q doesn't exist", secretID))
+		return nil, util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("secret %q doesn't exist", secretID), serrors.SecretDoesNotExist())
 	}
 
 	return secret, nil
 }
 
-func (h *ActionHandler) GetSecrets(ctx context.Context, parentKind types.ObjectKind, parentRef string, tree bool) ([]*types.Secret, error) {
+type GetSecretsResponse struct {
+	Secrets     []*types.Secret
+	ParentPaths map[string]string
+}
+
+func (h *ActionHandler) GetSecrets(ctx context.Context, parentKind types.ObjectKind, parentRef string, tree bool) (*GetSecretsResponse, error) {
 	var secrets []*types.Secret
+	parentPaths := map[string]string{}
 	err := h.d.Do(ctx, func(tx *sql.Tx) error {
 		parentID, err := h.ResolveObjectID(tx, parentKind, parentRef)
 		if err != nil {
 			return errors.WithStack(err)
 		}
+
 		if tree {
-			secrets, err = h.d.GetSecretsTree(tx, parentKind, parentID)
+			secrets, err = h.GetSecretsTree(tx, parentKind, parentID)
 		} else {
 			secrets, err = h.d.GetSecrets(tx, parentID)
 		}
-		return errors.WithStack(err)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		// populate secrets parent paths
+		for _, s := range secrets {
+			pp, err := h.GetPath(tx, s.Parent.Kind, s.Parent.ID)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			parentPaths[s.ID] = pp
+		}
+
+		return nil
 	})
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	return secrets, nil
+	return &GetSecretsResponse{
+		Secrets:     secrets,
+		ParentPaths: parentPaths,
+	}, nil
 }
 
 func (h *ActionHandler) ValidateSecretReq(ctx context.Context, req *CreateUpdateSecretRequest) error {
 	if req.Name == "" {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("secret name required"))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("secret name required"), serrors.InvalidSecretName())
 	}
 	if !util.ValidateName(req.Name) {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid secret name %q", req.Name))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid secret name %q", req.Name), serrors.InvalidSecretName())
 	}
 	if req.Type != types.SecretTypeInternal {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid secret type %q", req.Type))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid secret type %q", req.Type), serrors.InvalidSecretType())
 	}
 	switch req.Type {
 	case types.SecretTypeInternal:
 		if len(req.Data) == 0 {
-			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("empty secret data"))
+			return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("empty secret data"), serrors.InvalidSecretData())
 		}
 	}
 	if req.Parent.Kind == "" {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("secret parent kind required"))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("secret parent kind required"))
 	}
 	if req.Parent.ID == "" {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("secret parentid required"))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("secret parentid required"))
 	}
 	if req.Parent.Kind != types.ObjectKindProject && req.Parent.Kind != types.ObjectKindProjectGroup {
-		return util.NewAPIError(util.ErrBadRequest, errors.Errorf("invalid secret parent kind %q", req.Parent.Kind))
+		return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("invalid secret parent kind %q", req.Parent.Kind))
 	}
 
 	return nil
@@ -121,7 +219,7 @@ func (h *ActionHandler) CreateSecret(ctx context.Context, req *CreateUpdateSecre
 			return errors.WithStack(err)
 		}
 		if s != nil {
-			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("secret with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID))
+			return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("secret with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID), serrors.SecretAlreadyExists())
 		}
 
 		secret = types.NewSecret(tx)
@@ -165,7 +263,7 @@ func (h *ActionHandler) UpdateSecret(ctx context.Context, curSecretName string, 
 			return errors.WithStack(err)
 		}
 		if secret == nil {
-			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("secret with name %q for %s with id %q doesn't exists", curSecretName, req.Parent.Kind, req.Parent.ID))
+			return util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("secret with name %q for %s with id %q doesn't exists", curSecretName, req.Parent.Kind, req.Parent.ID), serrors.SecretDoesNotExist())
 		}
 
 		if secret.Name != req.Name {
@@ -175,7 +273,7 @@ func (h *ActionHandler) UpdateSecret(ctx context.Context, curSecretName string, 
 				return errors.WithStack(err)
 			}
 			if s != nil {
-				return util.NewAPIError(util.ErrBadRequest, errors.Errorf("secret with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID))
+				return util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("secret with name %q for %s with id %q already exists", req.Name, req.Parent.Kind, req.Parent.ID), serrors.SecretAlreadyExists())
 			}
 		}
 
@@ -213,7 +311,7 @@ func (h *ActionHandler) DeleteSecret(ctx context.Context, parentKind types.Objec
 			return errors.WithStack(err)
 		}
 		if secret == nil {
-			return util.NewAPIError(util.ErrBadRequest, errors.Errorf("secret with name %q doesn't exist", secretName))
+			return util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("secret with name %q doesn't exist", secretName), serrors.SecretDoesNotExist())
 		}
 
 		if err := h.d.DeleteSecret(tx, secret.ID); err != nil {

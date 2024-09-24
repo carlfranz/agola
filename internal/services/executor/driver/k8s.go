@@ -98,7 +98,15 @@ type K8sPod struct {
 	initVolumeDir string
 }
 
-func NewK8sDriver(log zerolog.Logger, executorID, toolboxPath, initImage string, initDockerConfig *registry.DockerConfig) (*K8sDriver, error) {
+type K8sDriverCreateOption func(*K8sDriver)
+
+func WithK8sDriverInitDockerConfig(initDockerConfig *registry.DockerConfig) func(*K8sDriver) {
+	return func(d *K8sDriver) {
+		d.initDockerConfig = initDockerConfig
+	}
+}
+
+func NewK8sDriver(log zerolog.Logger, executorID, toolboxPath, initImage string, opts ...K8sDriverCreateOption) (*K8sDriver, error) {
 	kubeClientConfig := NewKubeClientConfig("", "", "")
 	kubecfg, err := kubeClientConfig.ClientConfig()
 	if err != nil {
@@ -115,15 +123,18 @@ func NewK8sDriver(log zerolog.Logger, executorID, toolboxPath, initImage string,
 	}
 
 	d := &K8sDriver{
-		log:              log,
-		restconfig:       kubecfg,
-		client:           kubecli,
-		toolboxPath:      toolboxPath,
-		initImage:        initImage,
-		initDockerConfig: initDockerConfig,
-		namespace:        namespace,
-		executorID:       executorID,
-		k8sLabelArch:     corev1.LabelArchStable,
+		log:          log,
+		restconfig:   kubecfg,
+		client:       kubecli,
+		toolboxPath:  toolboxPath,
+		initImage:    initImage,
+		namespace:    namespace,
+		executorID:   executorID,
+		k8sLabelArch: corev1.LabelArchStable,
+	}
+
+	for _, o := range opts {
+		o(d)
 	}
 
 	serverVersion, err := d.client.Discovery().ServerVersion()
@@ -367,7 +378,7 @@ func (d *K8sDriver) NewPod(ctx context.Context, podConfig *PodConfig, out io.Wri
 			ImagePullSecrets: []corev1.LocalObjectReference{{Name: name}},
 			// don't mount service account secrets or pods will be able to talk with k8s
 			// api
-			AutomountServiceAccountToken: util.BoolP(false),
+			AutomountServiceAccountToken: util.Ptr(false),
 			InitContainers: []corev1.Container{
 				{
 					Name:  "initcontainer",

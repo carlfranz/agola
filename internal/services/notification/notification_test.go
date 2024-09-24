@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"gotest.tools/assert/cmp"
 
 	"agola.io/agola/internal/services/config"
+	serrors "agola.io/agola/internal/services/errors"
 	"agola.io/agola/internal/services/notification/action"
 	"agola.io/agola/internal/sqlg"
 	"agola.io/agola/internal/sqlg/sql"
@@ -92,7 +94,7 @@ func TestRunWebhookDelivery(t *testing.T) {
 		ns.c.WebhookURL = fmt.Sprintf("%s/%s", wr.exposedURL, "webhooks")
 		ns.c.WebhookSecret = webhookSecret
 
-		runWebhooks := make([]*types.RunWebhook, MaxRunWebhookDeliveriesQueryLimit+10)
+		runWebhooks := make([]*types.RunWebhook, maxRunWebhookDeliveriesQueryLimit+10)
 		for i := 0; i < len(runWebhooks); i++ {
 			runWebhooks[i] = createRunWebhook(t, ctx, ns, project01)
 			createRunWebhookDelivery(t, ctx, ns, runWebhooks[i].ID, types.DeliveryStatusNotDelivered)
@@ -351,7 +353,7 @@ func TestCommitStatusDelivery(t *testing.T) {
 		cs := setupStubCommitStatusUpdater()
 		ns.u = cs
 
-		commitStatuses := make([]*types.CommitStatus, MaxCommitStatusDeliveriesQueryLimit+10)
+		commitStatuses := make([]*types.CommitStatus, maxCommitStatusDeliveriesQueryLimit+10)
 		for i := 0; i < len(commitStatuses); i++ {
 			commitStatuses[i] = createCommitStatus(t, ctx, ns, i, fmt.Sprintf("projectID-%d", i))
 			createCommitStatusDelivery(t, ctx, ns, commitStatuses[i].ID, types.DeliveryStatusNotDelivered)
@@ -614,7 +616,7 @@ func TestGetProjectRunWebhookDeliveries(t *testing.T) {
 			// populate the expected run webhook deliveries
 			expectedProject01RunWebhookDeliveries := []*types.RunWebhookDelivery{}
 			for _, c := range project01RunWebhookDeliveries {
-				if len(tt.deliveryStatusFilter) > 0 && !deliveryStatusInSlice(tt.deliveryStatusFilter, c.DeliveryStatus) {
+				if len(tt.deliveryStatusFilter) > 0 && !slices.Contains(tt.deliveryStatusFilter, c.DeliveryStatus) {
 					continue
 				}
 				expectedProject01RunWebhookDeliveries = append(expectedProject01RunWebhookDeliveries, c)
@@ -622,11 +624,8 @@ func TestGetProjectRunWebhookDeliveries(t *testing.T) {
 			// default sortdirection is asc
 
 			// reverse if sortDirection is desc
-			// TODO(sgotti) use go 1.21 generics slices.Reverse when removing support for go < 1.21
 			if tt.sortDirection == types.SortDirectionDesc {
-				for i, j := 0, len(expectedProject01RunWebhookDeliveries)-1; i < j; i, j = i+1, j-1 {
-					expectedProject01RunWebhookDeliveries[i], expectedProject01RunWebhookDeliveries[j] = expectedProject01RunWebhookDeliveries[j], expectedProject01RunWebhookDeliveries[i]
-				}
+				slices.Reverse(expectedProject01RunWebhookDeliveries)
 			}
 
 			callsNumber := 0
@@ -698,7 +697,7 @@ func TestRunWebhooksCleaner(t *testing.T) {
 	expectedRunWebhooks := make([]*types.RunWebhook, 0)
 	expectedRunWebhookDeliveries := make([]*types.RunWebhookDelivery, 0)
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < maxRunWebhooksQueryLimit+10; i++ {
 		runWebhook := createRunWebhook(t, ctx, ns, project01)
 		expectedRunWebhooks = append(expectedRunWebhooks, runWebhook)
 
@@ -706,7 +705,7 @@ func TestRunWebhooksCleaner(t *testing.T) {
 		expectedRunWebhookDeliveries = append(expectedRunWebhookDeliveries, createRunWebhookDelivery(t, ctx, ns, runWebhook.ID, types.DeliveryStatusNotDelivered))
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < maxRunWebhooksQueryLimit+10; i++ {
 		runWebhook := createRunWebhook(t, ctx, ns, project02)
 		expectedRunWebhooks = append(expectedRunWebhooks, runWebhook)
 
@@ -715,7 +714,7 @@ func TestRunWebhooksCleaner(t *testing.T) {
 	}
 
 	runWebhookCreationTime := time.Now().Add(-1 * time.Hour)
-	for i := 0; i < 50; i++ {
+	for i := 0; i < maxRunWebhooksQueryLimit+10; i++ {
 		runWebhook := createRunWebhook(t, ctx, ns, project01)
 		createRunWebhookDelivery(t, ctx, ns, runWebhook.ID, types.DeliveryStatusDelivered)
 		createRunWebhookDelivery(t, ctx, ns, runWebhook.ID, types.DeliveryStatusNotDelivered)
@@ -824,7 +823,7 @@ func TestProjectRunWebhookRedelivery(t *testing.T) {
 
 		runWebhook := createRunWebhook(t, ctx, ns, project01)
 
-		expectedErr := util.NewAPIError(util.ErrNotExist, errors.Errorf("runWebhookDelivery %q doesn't exist", runWebhookDelivery01))
+		expectedErr := util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("runWebhookDelivery %q doesn't exist", runWebhookDelivery01), serrors.RunWebhookDeliveryDoesNotExist())
 		err := ns.ah.RunWebhookRedelivery(ctx, runWebhook.ProjectID, runWebhookDelivery01)
 		assert.Error(t, err, expectedErr.Error())
 	})
@@ -844,7 +843,7 @@ func TestProjectRunWebhookRedelivery(t *testing.T) {
 		runWebhook = createRunWebhook(t, ctx, ns, project02)
 		createRunWebhookDelivery(t, ctx, ns, runWebhook.ID, types.DeliveryStatusDelivered)
 
-		expectedErr := util.NewAPIError(util.ErrNotExist, errors.Errorf("runWebhookDelivery %q doesn't belong to project %q", runWebhookDelivery.ID, project02))
+		expectedErr := util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("runWebhookDelivery %q doesn't belong to project %q", runWebhookDelivery.ID, project02), serrors.RunWebhookDeliveryDoesNotExist())
 
 		err := ns.ah.RunWebhookRedelivery(ctx, project02, runWebhookDelivery.ID)
 		assert.Error(t, err, expectedErr.Error())
@@ -870,7 +869,7 @@ func TestProjectRunWebhookRedelivery(t *testing.T) {
 		ns.c.WebhookSecret = webhookSecret
 		ns.c.WebhookURL = fmt.Sprintf("%s/%s", wr.exposedURL, "webhooks")
 
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("the previous delivery of run webhook %q hasn't already been delivered", runWebhookDelivery.RunWebhookID))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("the previous delivery of run webhook %q hasn't already been delivered", runWebhookDelivery.RunWebhookID), serrors.RunWebhookDeliveryAlreadyInProgress())
 
 		err := ns.ah.RunWebhookRedelivery(ctx, runWebhook.ProjectID, runWebhookDelivery.ID)
 		assert.Error(t, err, expectedErr.Error())
@@ -900,7 +899,7 @@ func TestCommitStatusesCleaner(t *testing.T) {
 	expectedCommitStatuses := make([]*types.CommitStatus, 0)
 	expectedCommitStatusDeliveries := make([]*types.CommitStatusDelivery, 0)
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < maxCommitStatusesQueryLimit+10; i++ {
 		commitStatus := createCommitStatus(t, ctx, ns, 1, fmt.Sprintf("projectID-%d", i))
 		expectedCommitStatuses = append(expectedCommitStatuses, commitStatus)
 
@@ -909,7 +908,7 @@ func TestCommitStatusesCleaner(t *testing.T) {
 	}
 
 	commitStatusCreationTime := time.Now().Add(-1 * time.Hour)
-	for i := 0; i < 50; i++ {
+	for i := 0; i < maxCommitStatusesQueryLimit+10; i++ {
 		commitStatus := createCommitStatus(t, ctx, ns, i, fmt.Sprintf("projectID-%d", i))
 		createCommitStatusDelivery(t, ctx, ns, commitStatus.ID, types.DeliveryStatusDelivered)
 		createCommitStatusDelivery(t, ctx, ns, commitStatus.ID, types.DeliveryStatusNotDelivered)
@@ -1038,7 +1037,7 @@ func TestGetProjectCommitStatusDeliveries(t *testing.T) {
 			// populate the expected commit status deliveries
 			expectedProject01CommitStatusDeliveries := []*types.CommitStatusDelivery{}
 			for _, c := range project01CommitStatusDeliveries {
-				if len(tt.deliveryStatusFilter) > 0 && !deliveryStatusInSlice(tt.deliveryStatusFilter, c.DeliveryStatus) {
+				if len(tt.deliveryStatusFilter) > 0 && !slices.Contains(tt.deliveryStatusFilter, c.DeliveryStatus) {
 					continue
 				}
 				expectedProject01CommitStatusDeliveries = append(expectedProject01CommitStatusDeliveries, c)
@@ -1046,11 +1045,8 @@ func TestGetProjectCommitStatusDeliveries(t *testing.T) {
 			// default sortdirection is asc
 
 			// reverse if sortDirection is desc
-			// TODO(sgotti) use go 1.21 generics slices.Reverse when removing support for go < 1.21
 			if tt.sortDirection == types.SortDirectionDesc {
-				for i, j := 0, len(expectedProject01CommitStatusDeliveries)-1; i < j; i, j = i+1, j-1 {
-					expectedProject01CommitStatusDeliveries[i], expectedProject01CommitStatusDeliveries[j] = expectedProject01CommitStatusDeliveries[j], expectedProject01CommitStatusDeliveries[i]
-				}
+				slices.Reverse(expectedProject01CommitStatusDeliveries)
 			}
 
 			callsNumber := 0
@@ -1083,16 +1079,6 @@ func TestGetProjectCommitStatusDeliveries(t *testing.T) {
 			assert.Assert(t, cmp.Equal(callsNumber, tt.expectedCallsNumber))
 		})
 	}
-}
-
-// TODO(sgotti) use go 1.21 generics slices.Contains when removing support for go < 1.21
-func deliveryStatusInSlice(deliveryStatuses []types.DeliveryStatus, deliveryStatus types.DeliveryStatus) bool {
-	for _, s := range deliveryStatuses {
-		if deliveryStatus == s {
-			return true
-		}
-	}
-	return false
 }
 
 func TestProjectCommitStatusRedelivery(t *testing.T) {
@@ -1191,7 +1177,7 @@ func TestProjectCommitStatusRedelivery(t *testing.T) {
 
 		commitStatus := createCommitStatus(t, ctx, ns, 1, project01)
 
-		expectedErr := util.NewAPIError(util.ErrNotExist, errors.Errorf("commitStatusDelivery %q doesn't exist", commitStatusDelivery01))
+		expectedErr := util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("commitStatusDelivery %q doesn't exist", commitStatusDelivery01), serrors.CommitStatusDeliveryDoesNotExist())
 		err := ns.ah.CommitStatusRedelivery(ctx, commitStatus.ProjectID, commitStatusDelivery01)
 		if err == nil {
 			t.Fatalf("expected error %v, got nil err", expectedErr)
@@ -1216,7 +1202,7 @@ func TestProjectCommitStatusRedelivery(t *testing.T) {
 		commitStatus = createCommitStatus(t, ctx, ns, 1, project02)
 		createCommitStatusDelivery(t, ctx, ns, commitStatus.ID, types.DeliveryStatusDelivered)
 
-		expectedErr := util.NewAPIError(util.ErrNotExist, errors.Errorf("commitStatusDelivery %q doesn't belong to project %q", commitStatusDelivery.ID, project02))
+		expectedErr := util.NewAPIError(util.ErrNotExist, util.WithAPIErrorMsg("commitStatusDelivery %q doesn't belong to project %q", commitStatusDelivery.ID, project02), serrors.CommitStatusDeliveryDoesNotExist())
 
 		err := ns.ah.CommitStatusRedelivery(ctx, project02, commitStatusDelivery.ID)
 		if err == nil {
@@ -1244,7 +1230,7 @@ func TestProjectCommitStatusRedelivery(t *testing.T) {
 		cs := setupStubCommitStatusUpdater()
 		ns.u = cs
 
-		expectedErr := util.NewAPIError(util.ErrBadRequest, errors.Errorf("the previous delivery of commit status %q hasn't already been delivered", commitStatusDelivery.CommitStatusID))
+		expectedErr := util.NewAPIError(util.ErrBadRequest, util.WithAPIErrorMsg("the previous delivery of commit status %q hasn't already been delivered", commitStatusDelivery.CommitStatusID), serrors.CommitStatusDeliveryAlreadyInProgress())
 
 		err := ns.ah.CommitStatusRedelivery(ctx, commitStatus.ProjectID, commitStatusDelivery.ID)
 		if err == nil {

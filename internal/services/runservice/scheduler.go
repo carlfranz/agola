@@ -938,11 +938,11 @@ func (s *Runservice) executorTaskCleaner(ctx context.Context, executorTaskID str
 				s.log.Warn().Msgf("executor with id %q doesn't exist. marking executor task %q as failed", et.ExecutorID, et.ID)
 				et.FailError = "executor deleted"
 				et.Phase = types.ExecutorTaskPhaseFailed
-				et.EndTime = util.TimeP(time.Now())
+				et.EndTime = util.Ptr(time.Now())
 				for _, s := range et.Steps {
 					if s.Phase == types.ExecutorTaskPhaseRunning {
 						s.Phase = types.ExecutorTaskPhaseFailed
-						s.EndTime = util.TimeP(time.Now())
+						s.EndTime = util.Ptr(time.Now())
 					}
 				}
 				if err := s.d.UpdateExecutorTask(tx, et); err != nil {
@@ -1014,8 +1014,8 @@ func (s *Runservice) runTasksUpdater(ctx context.Context) error {
 	return nil
 }
 
-func (s *Runservice) OSTFileExists(path string) (bool, error) {
-	_, err := s.ost.Stat(path)
+func (s *Runservice) OSTFileExists(ctx context.Context, path string) (bool, error) {
+	_, err := s.ost.Stat(ctx, path)
 	if err != nil && !objectstorage.IsNotExist(err) {
 		return false, errors.WithStack(err)
 	}
@@ -1063,7 +1063,7 @@ func (s *Runservice) fetchLog(ctx context.Context, runID string, rt *types.RunTa
 	} else {
 		logPath = store.OSTRunTaskStepLogPath(rt.ID, stepnum)
 	}
-	ok, err := s.OSTFileExists(logPath)
+	ok, err := s.OSTFileExists(ctx, logPath)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -1108,7 +1108,7 @@ func (s *Runservice) fetchLog(ctx context.Context, runID string, rt *types.RunTa
 		}
 	}
 
-	return errors.WithStack(s.ost.WriteObject(logPath, resp.Body, size, false))
+	return errors.WithStack(s.ost.WriteObject(ctx, logPath, resp.Body, size, false))
 }
 
 func (s *Runservice) finishSetupLogPhase(ctx context.Context, runID, runTaskID string) error {
@@ -1277,7 +1277,7 @@ func (s *Runservice) fetchArchive(ctx context.Context, runID string, rt *types.R
 	}
 
 	path := store.OSTRunTaskArchivePath(rt.ID, stepnum)
-	ok, err := s.OSTFileExists(path)
+	ok, err := s.OSTFileExists(ctx, path)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -1319,7 +1319,7 @@ func (s *Runservice) fetchArchive(ctx context.Context, runID string, rt *types.R
 		}
 	}
 
-	return errors.WithStack(s.ost.WriteObject(path, resp.Body, size, false))
+	return errors.WithStack(s.ost.WriteObject(ctx, path, resp.Body, size, false))
 }
 
 func (s *Runservice) fetchTaskArchives(ctx context.Context, runID string, rt *types.RunTask) {
@@ -1399,22 +1399,22 @@ func (s *Runservice) taskFetcher(ctx context.Context, r *types.Run, rt *types.Ru
 
 	// write related logs runID
 	runIDPath := store.OSTRunTaskLogsRunPath(rt.ID, r.ID)
-	exists, err := s.OSTFileExists(runIDPath)
+	exists, err := s.OSTFileExists(ctx, runIDPath)
 	if err != nil {
 		s.log.Err(err).Send()
 	} else if !exists {
-		if err := s.ost.WriteObject(runIDPath, bytes.NewReader([]byte{}), 0, false); err != nil {
+		if err := s.ost.WriteObject(ctx, runIDPath, bytes.NewReader([]byte{}), 0, false); err != nil {
 			s.log.Err(err).Send()
 		}
 	}
 
 	// write related archives runID
 	runIDPath = store.OSTRunTaskArchivesRunPath(rt.ID, r.ID)
-	exists, err = s.OSTFileExists(runIDPath)
+	exists, err = s.OSTFileExists(ctx, runIDPath)
 	if err != nil {
 		s.log.Err(err).Send()
 	} else if !exists {
-		if err := s.ost.WriteObject(runIDPath, bytes.NewReader([]byte{}), 0, false); err != nil {
+		if err := s.ost.WriteObject(ctx, runIDPath, bytes.NewReader([]byte{}), 0, false); err != nil {
 			s.log.Err(err).Send()
 		}
 	}
@@ -1604,14 +1604,12 @@ func (s *Runservice) cacheCleaner(ctx context.Context, cacheExpireInterval time.
 	}
 	defer func() { _ = l.Unlock() }()
 
-	doneCh := make(chan struct{})
-	defer close(doneCh)
-	for object := range s.ost.List(store.OSTCacheDir()+"/", "", true, doneCh) {
+	for object := range s.ost.List(ctx, store.OSTCacheDir()+"/", "", true) {
 		if object.Err != nil {
 			return object.Err
 		}
 		if object.LastModified.Add(cacheExpireInterval).Before(time.Now()) {
-			if err := s.ost.DeleteObject(object.Path); err != nil {
+			if err := s.ost.DeleteObject(ctx, object.Path); err != nil {
 				if !objectstorage.IsNotExist(err) {
 					s.log.Warn().Err(err).Msgf("failed to delete cache object %q", object.Path)
 				}
@@ -1623,6 +1621,8 @@ func (s *Runservice) cacheCleaner(ctx context.Context, cacheExpireInterval time.
 }
 
 func (s *Runservice) workspaceCleanerLoop(ctx context.Context, workspaceExpireInterval time.Duration) {
+	s.log.Debug().Msgf("workspaceCleanerLoop")
+
 	for {
 		if err := s.objectsCleaner(ctx, store.OSTArchivesBaseDir(), common.WorkspaceCleanerLockKey, workspaceExpireInterval); err != nil {
 			s.log.Err(err).Send()
@@ -1654,23 +1654,19 @@ func (s *Runservice) logCleanerLoop(ctx context.Context, logExpireInterval time.
 	}
 }
 
-func (s *Runservice) objectsCleaner(ctx context.Context, prefix string, etcdLockKey string, objectExpireInterval time.Duration) error {
-	s.log.Debug().Msgf("objectsCleaner")
-
-	l := s.lf.NewLock(common.WorkspaceCleanerLockKey)
+func (s *Runservice) objectsCleaner(ctx context.Context, prefix string, lockKey string, objectExpireInterval time.Duration) error {
+	l := s.lf.NewLock(lockKey)
 	if err := l.Lock(ctx); err != nil {
 		return errors.Wrap(err, "failed to acquire object cleaner lock")
 	}
 	defer func() { _ = l.Unlock() }()
 
-	doneCh := make(chan struct{})
-	defer close(doneCh)
-	for object := range s.ost.List(prefix+"/", "", true, doneCh) {
+	for object := range s.ost.List(ctx, prefix+"/", "", true) {
 		if object.Err != nil {
 			return object.Err
 		}
 		if object.LastModified.Add(objectExpireInterval).Before(time.Now()) {
-			if err := s.ost.DeleteObject(object.Path); err != nil {
+			if err := s.ost.DeleteObject(ctx, object.Path); err != nil {
 				if !objectstorage.IsNotExist(err) {
 					s.log.Warn().Err(err).Msgf("failed to delete object %q", object.Path)
 				}
